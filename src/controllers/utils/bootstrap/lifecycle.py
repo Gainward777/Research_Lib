@@ -4,16 +4,20 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from mcp.server.mcpserver import MCPServer
 
-from controllers.utils.bootstrap.dependencies import build_container
+from controllers.utils.bootstrap.dependencies import GBrainFactory, build_container
 from controllers.utils.bootstrap.settings import Settings
 from controllers.workers.retry_controller import RetryWorker
 
 
-def create_lifespan(settings: Settings | None, mcp_server: MCPServer):
+def create_lifespan(
+    settings: Settings | None,
+    mcp_server: MCPServer,
+    gbrain_factory: GBrainFactory | None = None,
+):
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with mcp_server.session_manager.run():
-            container = await build_container(settings)
+            container = await build_container(settings, gbrain_factory=gbrain_factory)
             app.state.container = container
             retry_worker = RetryWorker(container)
             await retry_worker.start()

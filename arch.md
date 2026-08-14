@@ -357,8 +357,7 @@ Infrastructure содержит адаптеры конкретных внешн
 
 - управление GBrain subprocess;
 - сериализованная очередь mutating-операций GBrain;
-- вызовы `search` и `think/query`;
-- LLM client;
+- вызовы GBrain `search`, `query` и `think`;
 - скачивание Telegram-файлов;
 - atomic file writer;
 - сжатие и нормализация изображений.
@@ -473,7 +472,7 @@ received
 2. `idempotency_service` проверяет ключ и payload hash.
 3. Исходный текст и receipt фиксируются в SQLite.
 4. Вложения скачиваются во временные файлы.
-5. Материал классифицируется детерминированными правилами или bounded LLM fallback.
+5. Материал классифицируется консервативными детерминированными правилами.
 6. Создаётся Model библиотечного материала.
 7. Вложения записываются атомарно.
 8. Markdown/frontmatter записывается через temporary file и atomic rename.
@@ -561,7 +560,8 @@ Pipeline изображения:
 GBrain используется как производный поисковый слой:
 
 - `search` — retrieval без LLM-синтеза;
-- `think/query` — ответ с синтезом и источниками;
+- `query` — расширенный retrieval без синтеза;
+- `think` — LLM-синтез ответа с источниками;
 - PGLite хранится на persistent volume;
 - версия или commit GBrain закрепляется в репозитории;
 - все mutating-операции проходят через одну очередь;
@@ -602,7 +602,7 @@ POST /v1/schema/proposals/{proposal_id}/apply
 
 - forwarded message с caption и изображениями;
 - media group по `media_group_id`;
-- `/collect` → `/save`;
+- `/collect` → `/save`, включая текст, фото и документы;
 - `/idea <text>`;
 - `/paper <url-or-text>`;
 - `/save <text>`;
@@ -624,7 +624,10 @@ POST /v1/schema/proposals/{proposal_id}/apply
 /health
 ```
 
-Обычный текст сначала проходит детерминированный intent router. LLM вызывается только при неоднозначном намерении.
+Обычный текст проходит консервативный intent router: явный короткий вопрос без
+вложений направляется в GBrain `think`, а forwarded/media, отчёты, длинные
+многострочные сообщения и неоднозначный текст сохраняются. Это исключает потерю
+материала из-за ошибочной классификации.
 
 ## 14. MCP
 
@@ -724,15 +727,17 @@ LIBRARY_API_TOKEN=
 MCP_AUTH_TOKEN=
 
 LIBRARY_GBRAIN_COMMAND=gbrain
-LIBRARY_GBRAIN_MODE=pglite
 LIBRARY_GBRAIN_HOME=/data/library/gbrain
-LIBRARY_GBRAIN_VERSION=
-LIBRARY_GBRAIN_TIMEOUT_SECONDS=30
-
-LIBRARIAN_LLM_BASE_URL=
-LIBRARIAN_LLM_API_KEY=
-LIBRARIAN_LLM_MODEL=
-LIBRARIAN_LLM_TIMEOUT_SECONDS=60
+LIBRARY_GBRAIN_VERSION=0.45.12.0
+LIBRARY_GBRAIN_TIMEOUT_SECONDS=120
+LIBRARY_GBRAIN_NO_EMBEDDING=true
+LIBRARY_GBRAIN_EMBEDDING_MODEL=
+LIBRARY_GBRAIN_EMBEDDING_DIMENSIONS=
+LIBRARY_GBRAIN_THINK_MODEL=
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+ZEROENTROPY_API_KEY=
+VOYAGE_API_KEY=
 
 LIBRARY_IMAGE_MAX_LONG_SIDE_PX=2048
 LIBRARY_IMAGE_FORMAT=webp
@@ -748,6 +753,9 @@ LOG_LEVEL=INFO
 ```
 
 Настройки валидируются до запуска зависимых компонентов. Неизвестные переменные окружения не передаются GBrain subprocess.
+Для ответов нужен ключ chat-провайдера. По умолчанию GBrain использует Anthropic;
+для другого провайдера задаются `LIBRARY_GBRAIN_THINK_MODEL` и соответствующий
+provider key.
 
 ## 19. Безопасность
 
@@ -771,7 +779,7 @@ LOG_LEVEL=INFO
 - `/readyz` проверяет writable volume, SQLite migrations и GBrain;
 - graceful shutdown завершает активную SQLite transaction;
 - во время shutdown не запускаются новые mutating GBrain jobs;
-- GBrain не обновляется без изменения pinned version.
+- GBrain 0.45.12.0 собирается из commit `7fdcd8bd2ee0b3546b167da14cddd27eb2507212` и не обновляется без изменения pin в Dockerfile.
 
 Резервировать обязательно:
 
@@ -884,12 +892,9 @@ PGLite можно резервировать дополнительно, но в
 
 ### Этап 4. Librarian
 
-- реализовать intent service;
-- добавить bounded LLM fallback;
-- подключить GBrain search и think;
-- добавить источники и related items;
-- добавить dedup;
-- добавить schema proposal workflow.
+- intent service, GBrain search/think и источники реализованы;
+- related items и schema proposal workflow реализованы;
+- dedup по URL/content similarity остаётся следующим этапом.
 
 ### Этап 5. Внешние исследовательские сервисы
 

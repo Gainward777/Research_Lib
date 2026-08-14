@@ -1,7 +1,9 @@
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_GBRAIN_VERSION = "0.45.12.0"
 
 
 class Settings(BaseSettings):
@@ -22,16 +24,14 @@ class Settings(BaseSettings):
     library_api_token: str = ""
     mcp_auth_token: str = ""
 
-    library_gbrain_mode: str = "local"
     library_gbrain_command: str = "gbrain"
     library_gbrain_home: Path | None = None
-    library_gbrain_version: str = ""
-    library_gbrain_timeout_seconds: float = 30
-
-    librarian_llm_base_url: str = ""
-    librarian_llm_api_key: str = ""
-    librarian_llm_model: str = ""
-    librarian_llm_timeout_seconds: float = 60
+    library_gbrain_version: str = DEFAULT_GBRAIN_VERSION
+    library_gbrain_timeout_seconds: float = 120
+    library_gbrain_no_embedding: bool = True
+    library_gbrain_embedding_model: str = ""
+    library_gbrain_embedding_dimensions: int | None = None
+    library_gbrain_think_model: str = ""
 
     library_image_max_long_side_px: int = 2048
     library_image_format: str = "webp"
@@ -54,12 +54,25 @@ class Settings(BaseSettings):
             return [int(part.strip()) for part in value.split(",") if part.strip()]
         return value
 
-    @field_validator("library_gbrain_mode")
+    @field_validator("library_gbrain_embedding_dimensions", mode="before")
     @classmethod
-    def validate_gbrain_mode(cls, value: str) -> str:
-        if value not in {"local", "subprocess"}:
-            raise ValueError("LIBRARY_GBRAIN_MODE must be local or subprocess")
-        return value
+    def parse_optional_int(cls, value: object) -> object:
+        return None if value in (None, "") else value
+
+    @model_validator(mode="after")
+    def validate_gbrain_embedding(self) -> "Settings":
+        if not self.library_gbrain_version:
+            raise ValueError("LIBRARY_GBRAIN_VERSION must pin the Docker runtime version")
+        if not self.library_gbrain_no_embedding:
+            if not self.library_gbrain_embedding_model:
+                raise ValueError(
+                    "LIBRARY_GBRAIN_EMBEDDING_MODEL is required when embeddings are enabled"
+                )
+            if self.library_gbrain_embedding_dimensions is None:
+                raise ValueError(
+                    "LIBRARY_GBRAIN_EMBEDDING_DIMENSIONS is required when embeddings are enabled"
+                )
+        return self
 
     def model_post_init(self, __context: object) -> None:
         if self.library_brain_root is None:

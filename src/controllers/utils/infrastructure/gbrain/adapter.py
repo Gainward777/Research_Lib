@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from controllers.utils.BD.markdown import MarkdownItemRepository
+from controllers.utils.infrastructure.filesystem.atomic_writer import atomic_write_text
 from errors import SearchBackendError
 from models.commands import SearchCommand
 from models.enums import LibraryItemType
@@ -14,7 +15,9 @@ from models.results import AnswerResult, SearchHit
 
 
 class GBrainAdapter:
-    """Serialized official GBrain CLI adapter with a Markdown search fallback."""
+    """Serialized adapter for the pinned official GBrain CLI and its PGLite engine."""
+
+    BOOTSTRAP_MARKER_NAME = ".research-library-bootstrap-v1"
 
     SAFE_ENVIRONMENT_NAMES = (
         "PATH",
@@ -27,112 +30,200 @@ class GBrainAdapter:
         "HOME",
         "APPDATA",
         "LOCALAPPDATA",
+        "OPENAI_API_KEY",
+        "ZEROENTROPY_API_KEY",
+        "VOYAGE_API_KEY",
+        "ANTHROPIC_API_KEY",
     )
+    READY_STATUSES = {"ok", "healthy", "ready", "pass", "warn", "warning", "degraded"}
+    FAILED_CHECK_STATUSES = {"error", "fail", "failed", "unhealthy"}
+    CRITICAL_CHECK_NAMES = {
+        "connection",
+        "schema_version",
+        "pgvector",
+        "pglite_data_dir",
+        "pglite_runtime",
+    }
 
     def __init__(
         self,
         repository: MarkdownItemRepository,
         *,
-        mode: str = "local",
         command: str = "gbrain",
         timeout_seconds: float = 30,
-        home: Path | None = None,
+        home: Path,
+        expected_version: str = "",
+        no_embedding: bool = True,
+        embedding_model: str = "",
+        embedding_dimensions: int | None = None,
+        think_model: str = "",
     ) -> None:
         self.repository = repository
-        self.mode = mode
         self.command = command
         self.timeout_seconds = timeout_seconds
         self.home = home
-        self._write_lock = asyncio.Lock()
+        self.expected_version = expected_version
+        self.no_embedding = no_embedding
+        self.embedding_model = embedding_model
+        self.embedding_dimensions = embedding_dimensions
+        self.think_model = think_model
+        # PGLite is single-process. Every CLI invocation must be serialized,
+        # including reads, otherwise concurrent Telegram/API requests contend
+        # for the same embedded database lock.
+        self._process_lock = asyncio.Lock()
+
+    async def initialize(self) -> bool:
+        """Create or migrate the persistent PGLite brain and verify its runtime.
+
+        Returns True until bootstrap has fully rebuilt GBrain from the durable
+        Markdown pages and written its completion marker.
+        """
+        self.home.mkdir(parents=True, exist_ok=True)
+        await self._verify_version()
+
+        config_path = self.home / "config.json"
+        created = not config_path.exists()
+        if created:
+            arguments = [
+                "init",
+                "--pglite",
+                "--non-interactive",
+                "--path",
+                str(self.home / "brain.pglite"),
+                "--json",
+            ]
+            if self.no_embedding:
+                arguments.append("--no-embedding")
+            else:
+                arguments.extend(["--embedding-model", self.embedding_model])
+                arguments.extend(["--embedding-dimensions", str(self.embedding_dimensions)])
+            result = await self._run_json(arguments)
+            status = str(result.get("status", "success")).casefold()
+            if status not in {"ok", "success", "ready"}:
+                raise SearchBackendError(f"GBrain initialization failed: {result}")
+        else:
+            await self._run_json(["init", "--migrate-only", "--json"])
+
+        if not await self._doctor_health():
+            raise SearchBackendError("GBrain health check failed after initialization")
+        return not (self.home / self.BOOTSTRAP_MARKER_NAME).exists()
+
+    def mark_bootstrap_complete(self) -> None:
+        atomic_write_text(
+            self.home / self.BOOTSTRAP_MARKER_NAME,
+            f"gbrain={self.expected_version or 'unknown'}\n",
+        )
 
     async def health(self) -> bool:
-        if self.mode == "local":
-            return True
+        """Cheap readiness probe that opens PGLite and reads its statistics."""
+        try:
+            result = await self._run_call("get_stats", {})
+        except Exception:
+            return False
+        return isinstance(self._unwrap(result), dict)
+
+    async def _doctor_health(self) -> bool:
+        """Full startup diagnostic, limited to checks that block library storage."""
         try:
             result = await self._run_json(["doctor", "--json"])
-            status = str(result.get("status", result.get("state", "ok"))).casefold()
-            return status in {"ok", "healthy", "ready", "pass"}
         except Exception:
             return False
 
+        checks = result.get("checks")
+        if isinstance(checks, list):
+            connection_seen = False
+            for check in checks:
+                if not isinstance(check, dict):
+                    continue
+                name = str(check.get("name", ""))
+                status = str(check.get("status", "")).casefold()
+                if name == "connection":
+                    connection_seen = True
+                if name in self.CRITICAL_CHECK_NAMES and status in self.FAILED_CHECK_STATUSES:
+                    return False
+            # Opinionated maintenance checks (brain score, graph coverage,
+            # enrichment) can fail on an empty but operational library and do
+            # not make the storage engine unavailable.
+            return connection_seen
+
+        status = str(result.get("status", result.get("state", ""))).casefold()
+        return status in self.READY_STATUSES
+
     async def index(self, item: LibraryItem) -> None:
-        if self.mode == "local":
-            return
         row = await self.repository.database.fetchone(
             "SELECT path, slug FROM library_items WHERE id = ?", (item.id,)
         )
         if row is None:
             raise SearchBackendError(f"Cannot index unknown item: {item.id}")
         content = (self.repository.brain_root / row["path"]).read_bytes()
-        async with self._write_lock:
-            await self._run_command(["put", str(row["slug"])], content)
+        # stdin avoids argv length limits for unstructured Telegram messages.
+        await self._run_command(["put", str(row["slug"])], content)
 
     async def search(self, command: SearchCommand) -> list[SearchHit]:
-        if self.mode == "subprocess":
-            payload: dict[str, Any] = {"query": command.query, "limit": command.limit}
-            if command.types:
-                payload["types"] = [item.value for item in command.types]
-            if command.tags:
-                payload["tags"] = command.tags
-            result = await self._run_call("search", payload)
-            return self._normalize_hits(result, command.limit)
-        return await self._local_search(command)
+        # GBrain search accepts query/limit, while application-level type and tag
+        # filters belong to the library contract and are applied after retrieval.
+        gbrain_limit = 100 if command.types or command.tags else command.limit
+        result = await self._run_call("search", {"query": command.query, "limit": gbrain_limit})
+        hits = self._normalize_hits(result, gbrain_limit)
+        return self._filter_hits(hits, command)[: command.limit]
 
-    async def ask(self, command: SearchCommand) -> AnswerResult:
-        if self.mode == "subprocess":
-            result = await self._run_call("query", {"query": command.query, "limit": command.limit})
-            data = self._unwrap(result)
-            if not isinstance(data, dict):
-                return AnswerResult(answer=str(data))
-            answer = str(data.get("answer") or data.get("response") or data.get("text") or "")
-            sources_value = data.get("sources") or data.get("hits") or data.get("results") or []
-            return AnswerResult(
-                answer=answer, sources=self._normalize_hits(sources_value, command.limit)
-            )
-        hits = await self._local_search(command)
-        if not hits:
-            return AnswerResult(answer="В библиотеке не найдено подходящих материалов.")
-        source_lines = [f"- {hit.title}: {hit.summary or hit.slug}" for hit in hits[:5]]
-        return AnswerResult(
-            answer="Найдены релевантные материалы:\n" + "\n".join(source_lines),
-            sources=hits[:5],
-        )
+    async def query(self, command: SearchCommand) -> list[SearchHit]:
+        result = await self._run_call("query", {"query": command.query, "limit": command.limit})
+        return self._normalize_hits(result, command.limit)
 
-    async def _local_search(self, command: SearchCommand) -> list[SearchHit]:
-        terms = set(re.findall(r"[\w-]+", command.query.casefold()))
-        hits: list[SearchHit] = []
-        allowed_types = set(command.types)
-        required_tags = {tag.casefold() for tag in command.tags}
-        for page in self.repository.iter_pages():
-            try:
-                item = self.repository.parse(page.read_text(encoding="utf-8"))
-            except (ValueError, TypeError):
-                continue
-            if allowed_types and item.type not in allowed_types:
-                continue
-            item_tags = {tag.casefold() for tag in item.tags}
-            if required_tags and not required_tags.issubset(item_tags):
-                continue
-            haystack = " ".join(
-                [item.title, item.summary, item.content, " ".join(item.tags)]
-            ).casefold()
-            matched = sum(1 for term in terms if term in haystack)
-            if not matched:
-                continue
-            relative = page.relative_to(self.repository.brain_root).with_suffix("").as_posix()
-            hits.append(
-                SearchHit(
-                    item_id=item.id,
-                    slug=relative,
-                    type=item.type,
-                    title=item.title,
-                    summary=item.summary,
-                    score=matched / max(len(terms), 1),
-                    tags=item.tags,
+    async def think(self, command: SearchCommand) -> AnswerResult:
+        payload: dict[str, Any] = {"question": command.query}
+        if self.think_model:
+            payload["model"] = self.think_model
+        result = self._unwrap(await self._run_call("think", payload))
+        if not isinstance(result, dict):
+            raise SearchBackendError("GBrain think returned an invalid response")
+
+        synthesis_ok = result.get("synthesisOk", result.get("synthesis_ok", True))
+        answer = str(result.get("answer") or "").strip()
+        if synthesis_ok is False or not answer:
+            warnings = result.get("warnings")
+            detail = ", ".join(map(str, warnings)) if isinstance(warnings, list) else ""
+            suffix = f": {detail}" if detail else ""
+            raise SearchBackendError(f"GBrain could not synthesize an answer{suffix}")
+
+        sources: list[SearchHit] = []
+        seen_slugs: set[str] = set()
+        citations = result.get("citations")
+        if isinstance(citations, list):
+            for citation in citations:
+                if not isinstance(citation, dict):
+                    continue
+                slug = str(citation.get("page_slug") or citation.get("slug") or "")
+                if not slug or slug in seen_slugs:
+                    continue
+                stored = await self.repository.get(slug)
+                if stored is None:
+                    continue
+                item, stored_slug = stored
+                sources.append(
+                    SearchHit(
+                        item_id=item.id,
+                        slug=stored_slug,
+                        type=item.type,
+                        title=item.title,
+                        summary=item.summary,
+                        tags=item.tags,
+                    )
                 )
+                seen_slugs.add(slug)
+        return AnswerResult(answer=answer, sources=sources)
+
+    async def _verify_version(self) -> None:
+        output = (await self._run_command(["--version"])).decode("utf-8", errors="replace")
+        match = re.search(r"\d+(?:\.\d+){2,3}", output)
+        actual = match.group(0) if match else ""
+        if not actual:
+            raise SearchBackendError(f"Cannot determine GBrain version from: {output.strip()}")
+        if self.expected_version and actual != self.expected_version:
+            raise SearchBackendError(
+                f"GBrain version mismatch: expected {self.expected_version}, got {actual}"
             )
-        hits.sort(key=lambda hit: (-hit.score, hit.title.casefold()))
-        return hits[: command.limit]
 
     async def _run_call(self, operation: str, payload: dict[str, Any]) -> Any:
         compact = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -160,22 +251,35 @@ class GBrainAdapter:
             for name in self.SAFE_ENVIRONMENT_NAMES
             if (value := os.environ.get(name)) is not None
         }
-        if self.home is not None:
-            environment["GBRAIN_HOME"] = str(self.home)
+        environment["GBRAIN_HOME"] = str(self.home)
+        environment["GBRAIN_NO_ONBOARD_NUDGE"] = "1"
         try:
-            process = await asyncio.create_subprocess_exec(
-                self.command,
-                *arguments,
-                stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=self.home,
-                env=environment,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(stdin), self.timeout_seconds
-            )
-        except (OSError, TimeoutError) as exc:
+            async with self._process_lock:
+                process = await asyncio.create_subprocess_exec(
+                    self.command,
+                    *arguments,
+                    stdin=(
+                        asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL
+                    ),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=self.home,
+                    env=environment,
+                )
+                try:
+                    stdout, stderr = await asyncio.wait_for(
+                        process.communicate(stdin), self.timeout_seconds
+                    )
+                except TimeoutError as exc:
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
+                    await process.communicate()
+                    raise SearchBackendError(
+                        f"GBrain command timed out after {self.timeout_seconds:g} seconds"
+                    ) from exc
+        except OSError as exc:
             raise SearchBackendError(f"GBrain command failed: {exc}") from exc
         if process.returncode != 0:
             message = stderr.decode("utf-8", errors="replace").strip()
@@ -208,13 +312,28 @@ class GBrainAdapter:
                     type=item_type,
                     title=str(raw.get("title") or frontmatter.get("title") or slug),
                     summary=str(
-                        raw.get("summary") or raw.get("snippet") or raw.get("content") or ""
+                        raw.get("summary")
+                        or raw.get("snippet")
+                        or raw.get("compiled_truth")
+                        or raw.get("content")
+                        or ""
                     )[:1000],
                     score=float(raw.get("score") or raw.get("rank") or 0),
                     tags=list(raw.get("tags") or frontmatter.get("tags") or []),
                 )
             )
         return hits
+
+    @staticmethod
+    def _filter_hits(hits: list[SearchHit], command: SearchCommand) -> list[SearchHit]:
+        allowed_types = set(command.types)
+        required_tags = {tag.casefold() for tag in command.tags}
+        return [
+            hit
+            for hit in hits
+            if (not allowed_types or hit.type in allowed_types)
+            and (not required_tags or required_tags.issubset({tag.casefold() for tag in hit.tags}))
+        ]
 
     @staticmethod
     def _unwrap(value: Any) -> Any:

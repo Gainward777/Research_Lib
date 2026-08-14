@@ -143,6 +143,15 @@ class MarkdownItemRepository:
             sections.extend(["## Резюме", item.summary])
         if item.content:
             sections.extend(["## Содержание", item.content])
+        if item.attachments:
+            rendered_attachments = []
+            for attachment in item.attachments:
+                label = attachment.original_name or Path(attachment.path).name
+                if attachment.mime_type.startswith("image/"):
+                    rendered_attachments.append(f"![[{attachment.path}|{label}]]")
+                else:
+                    rendered_attachments.append(f"[[{attachment.path}|{label}]]")
+            sections.extend(["## Вложения", "\n".join(rendered_attachments)])
         return "\n\n".join(sections).rstrip() + "\n"
 
     @staticmethod
@@ -161,6 +170,10 @@ class MarkdownItemRepository:
                 summary = summary_part
         elif "## Содержание" in body:
             main_content = body.split("## Содержание", 1)[1]
-        data["summary"] = summary.strip()
+        if "## Вложения" in summary:
+            summary = summary.split("## Вложения", 1)[0]
+        if "## Вложения" in main_content:
+            main_content = main_content.split("## Вложения", 1)[0]
         data["content"] = main_content.strip()
+        data["summary"] = summary.strip()
         return LibraryItem.model_validate(data)

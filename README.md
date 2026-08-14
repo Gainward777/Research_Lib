@@ -70,13 +70,13 @@ Obsidian Sync или Obsidian Headless.
 - включить один writer и одну Railway replica;
 - выполнять mutating-операции через одну очередь;
 - использовать `search` для дешёвого retrieval без синтеза;
-- использовать `think/query` для ответа с LLM-синтезом и источниками;
+- использовать `think` для ответа с LLM-синтезом и источниками;
 - использовать собственный `research-v1` schema pack;
 - оставить возможность миграции на отдельный PostgreSQL при росте нагрузки.
 
 ### 2.4. LLM
 
-GBrain `think/query` является основным синтезатором ответов на вопросы.
+GBrain `think` является основным синтезатором ответов на вопросы.
 Отдельный вызов модели допускается для:
 
 - определения типа нового неструктурированного материала;
@@ -99,7 +99,7 @@ Library Telegram Bot
     |       |
     |       +--> ingestion pipeline
     |       +--> GBrain search
-    |       +--> GBrain think/query
+    |       +--> GBrain think
     |
     v
 Library Service API / MCP facade
@@ -313,7 +313,7 @@ LIBRARY_SCHEMA_MUTATION_MODE=propose  # disabled | propose | auto
 
 ```text
 /search <query>     быстрый retrieval без LLM-синтеза
-/ask <question>     GBrain think/query
+/ask <question>     GBrain think
 /recent [type]
 /item <id-or-slug>
 /related <id-or-slug>
@@ -326,11 +326,11 @@ LIBRARY_SCHEMA_MUTATION_MODE=propose  # disabled | propose | auto
 
 Обычный текст:
 
-1. deterministic router проверяет forward/media/active collection session;
-2. явные команды обрабатываются без LLM;
-3. вопросительный запрос идёт в `think`;
-4. неоднозначный текст классифицируется одним bounded LLM-вызовом;
-5. при низкой уверенности бот задаёт scoped-вопрос, а не сохраняет наугад.
+1. явные команды обрабатываются напрямую;
+2. forward, media и активная collection session всегда идут в ingestion;
+3. короткий явно сформулированный вопрос без вложений идёт в GBrain `think`;
+4. отчёт, длинный многострочный текст и явная просьба сохранить идут в ingestion;
+5. неоднозначный текст сохраняется, чтобы библиотекарь не потерял материал.
 
 ### 7.3. Ответ после сохранения
 
@@ -467,7 +467,7 @@ Response:
 ```
 
 `synthesize=false` использует GBrain search. `synthesize=true` использует
-GBrain think/query.
+GBrain think.
 
 ### 9.4. Идемпотентность
 
@@ -623,15 +623,13 @@ research-library/
 - Pydantic 2;
 - pytest + pytest-asyncio.
 
-GBrain устанавливается как отдельный pinned runtime dependency внутри
-контейнера. Прежде чем выбирать способ запуска, выполнить spike:
-
-1. GBrain PGLite на `/data`;
-2. write/search/think round trip;
-3. restart с сохранением данных;
-4. последовательные writes из Telegram и API;
-5. remote MCP client read/write;
-6. reindex из Markdown после удаления тестового PGLite.
+GBrain `0.45.12.0` (commit `7fdcd8bd2ee0b3546b167da14cddd27eb2507212`)
+компилируется в Dockerfile и запускается CLI-подпроцессами внутри того же контейнера.
+При старте приложение автоматически создаёт PGLite в `LIBRARY_GBRAIN_HOME` или
+применяет миграции к существующей базе, затем выполняет `gbrain doctor --json`.
+Без бинарника нужной версии или исправного GBrain приложение не стартует.
+Markdown-поиска в production нет. Все обращения к PGLite сериализованы, а при
+создании новой базы индекс восстанавливается из долговечных Markdown-страниц.
 
 ## 14. Конфигурация
 
@@ -652,15 +650,17 @@ LIBRARY_API_TOKEN=
 MCP_AUTH_TOKEN=
 
 LIBRARY_GBRAIN_COMMAND=gbrain
-LIBRARY_GBRAIN_MODE=pglite
 LIBRARY_GBRAIN_HOME=/data/library/gbrain
-LIBRARY_GBRAIN_VERSION=
-LIBRARY_GBRAIN_TIMEOUT_SECONDS=30
-
-LIBRARIAN_LLM_BASE_URL=
-LIBRARIAN_LLM_API_KEY=
-LIBRARIAN_LLM_MODEL=
-LIBRARIAN_LLM_TIMEOUT_SECONDS=60
+LIBRARY_GBRAIN_VERSION=0.45.12.0
+LIBRARY_GBRAIN_TIMEOUT_SECONDS=120
+LIBRARY_GBRAIN_NO_EMBEDDING=true
+LIBRARY_GBRAIN_EMBEDDING_MODEL=
+LIBRARY_GBRAIN_EMBEDDING_DIMENSIONS=
+LIBRARY_GBRAIN_THINK_MODEL=
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+ZEROENTROPY_API_KEY=
+VOYAGE_API_KEY=
 
 LIBRARY_IMAGE_MAX_LONG_SIDE_PX=2048
 LIBRARY_IMAGE_FORMAT=webp
@@ -675,8 +675,10 @@ LIBRARY_JOB_POLL_SECONDS=1
 LOG_LEVEL=INFO
 ```
 
-Названия конкретных GBrain provider/model settings уточнить в bootstrap spike и
-зафиксировать в `.env.example`. Не проксировать неизвестные переменные
+По умолчанию используется настоящий GBrain с keyword search без внешнего embedding provider.
+Для ответов на вопросы задайте ключ chat-провайдера; модель по умолчанию GBrain требует
+`ANTHROPIC_API_KEY`, либо задайте `LIBRARY_GBRAIN_THINK_MODEL` и ключ соответствующего
+провайдера. Для semantic search отключите `LIBRARY_GBRAIN_NO_EMBEDDING` и задайте модель, размерность и ключ выбранного GBrain provider. Не проксировать неизвестные переменные
 пользовательского окружения в GBrain subprocess.
 
 ## 15. Railway deployment
@@ -763,25 +765,24 @@ PGLite также можно резервировать, но восстанов
 
 ### Этап 3. Telegram ingestion
 
-- [ ] Подключить aiogram polling.
-- [ ] Реализовать allowlists.
-- [ ] Обработать forwarded messages.
-- [ ] Обработать media groups.
-- [ ] Реализовать `/collect`, `/save`, `/cancel`.
-- [ ] Реализовать commands для idea/publication.
-- [ ] Реализовать понятные terminal receipts.
+- [x] Подключить aiogram polling.
+- [x] Реализовать allowlists.
+- [x] Обработать forwarded messages.
+- [x] Обработать media groups.
+- [x] Реализовать `/collect`, `/save`, `/cancel`, включая вложения.
+- [x] Реализовать commands для idea/publication.
+- [x] Реализовать terminal receipts.
 
 Критерий: forwarded report с несколькими изображениями становится одним item.
 
 ### Этап 4. Librarian query/enrichment
 
-- [ ] Реализовать deterministic intent router.
-- [ ] Добавить bounded LLM fallback.
-- [ ] Подключить GBrain search и think.
-- [ ] Добавить citations/source rendering.
-- [ ] Добавить related items.
+- [x] Реализовать консервативный intent router.
+- [x] Подключить GBrain search и think.
+- [x] Добавить citations/source rendering.
+- [x] Добавить related items.
 - [ ] Добавить dedup по URL/content similarity.
-- [ ] Добавить schema proposal workflow.
+- [x] Добавить schema proposal workflow.
 
 Критерий: запрос по описанию находит отчёт без знания ID и возвращает исходные
 изображения.

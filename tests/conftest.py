@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from controllers.api.app import create_app
 from controllers.utils.bootstrap.settings import Settings
+from tests.fakes import FakeGBrainAdapter
 
 
 @pytest.fixture
@@ -13,13 +14,12 @@ def settings(tmp_path: Path) -> Settings:
         library_data_root=tmp_path / "library",
         library_api_token="test-api-token",
         mcp_auth_token="test-mcp-token",
-        library_gbrain_mode="local",
     )
 
 
 @pytest.fixture
 def client(settings: Settings):
-    with TestClient(create_app(settings)) as test_client:
+    with TestClient(create_app(settings, gbrain_factory=FakeGBrainAdapter)) as test_client:
         yield test_client
 
 

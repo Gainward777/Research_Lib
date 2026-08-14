@@ -14,19 +14,24 @@ from controllers.api import (
 )
 from controllers.mcp.auth import is_mcp_authorized
 from controllers.mcp.server import create_mcp_http_app
+from controllers.utils.bootstrap.dependencies import GBrainFactory
 from controllers.utils.bootstrap.lifecycle import create_lifespan
 from controllers.utils.bootstrap.settings import Settings
 from errors import IdempotencyConflictError, NotFoundError, ResearchLibraryError
 from views.api.error_view import render_error
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    gbrain_factory: GBrainFactory | None = None,
+) -> FastAPI:
     mcp_server, mcp_http_app = create_mcp_http_app()
     app = FastAPI(
         title="Research Library",
         version="0.1.0",
         description="Persistent Markdown research library for Telegram and external services.",
-        lifespan=create_lifespan(settings, mcp_server),
+        lifespan=create_lifespan(settings, mcp_server, gbrain_factory),
     )
     for router in (
         health_controller.router,

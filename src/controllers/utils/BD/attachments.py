@@ -86,9 +86,20 @@ class AttachmentStore:
         )
         return Attachment(
             id=upload_id,
-            path=target_relative.as_posix(),
+            path=(Path("attachments") / target_relative).as_posix(),
             sha256=row["sha256"],
             mime_type=row["mime_type"],
             size_bytes=row["size_bytes"],
             original_name=row["original_name"],
         )
+
+    async def discard(self, upload_id: str) -> None:
+        row = await self.database.fetchone("SELECT * FROM uploads WHERE id = ?", (upload_id,))
+        if row is None or row["consumed_at"] is not None:
+            return
+        path = self.root / row["path"]
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            return
+        await self.database.execute("DELETE FROM uploads WHERE id = ?", (upload_id,))

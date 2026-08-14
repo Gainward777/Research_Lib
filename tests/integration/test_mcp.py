@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 
 from controllers.mcp.server import dispatch, mcp
+from controllers.utils.bootstrap.dependencies import build_container
+from tests.fakes import FakeGBrainAdapter
 
 INITIALIZE_REQUEST = {
     "jsonrpc": "2.0",
@@ -46,7 +48,11 @@ def test_streamable_http_endpoint_and_auth(client) -> None:
 @pytest.mark.asyncio
 async def test_mcp_tools_and_round_trip(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LIBRARY_DATA_ROOT", str(tmp_path / "library"))
-    monkeypatch.setenv("LIBRARY_GBRAIN_MODE", "local")
+
+    async def build_test_container():
+        return await build_container(gbrain_factory=FakeGBrainAdapter)
+
+    monkeypatch.setattr("controllers.mcp.server.build_container", build_test_container)
 
     tools = await mcp.list_tools()
     assert {tool.name for tool in tools} == {
