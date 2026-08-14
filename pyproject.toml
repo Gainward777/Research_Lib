@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["main", "errors"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"controllers.utils.BD.migrations" = ["versions/*.sql"]
+"controllers.utils" = ["schema-packs/**/*.yaml", "schema-packs/**/*.md"]
+views = ["integrations/**/*.md"]
+
+[project]
+name = "research-library"
+version = "0.1.0"
+description = "Persistent research library for Telegram, Codex and AutoResearch"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "aiogram>=3.20,<4",
+    "aiosqlite>=0.21,<1",
+    "fastapi>=0.116,<1",
+    "httpx>=0.28,<1",
+    "mcp>=2,<3",
+    "pillow>=11.3,<13",
+    "pydantic>=2.11,<3",
+    "pydantic-settings>=2.10,<3",
+    "python-multipart>=0.0.20,<1",
+    "pyyaml>=6.0.2,<7",
+    "uvicorn[standard]>=0.35,<1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4,<10",
+    "pytest-asyncio>=1.1,<2",
+    "ruff>=0.12,<1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/controllers/api/*.py" = ["B008"]

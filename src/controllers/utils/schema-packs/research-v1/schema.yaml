@@ -1,0 +1,20 @@
+version: research-v1
+types:
+  - experiment
+  - experiment-report
+  - idea
+  - publication
+  - method
+  - concept
+  - model
+  - dataset
+  - source
+  - note
+required_fields:
+  - id
+  - type
+  - title
+  - created_at
+  - updated_at
+  - source_kind
+  - schema_version

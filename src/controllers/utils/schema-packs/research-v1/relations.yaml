@@ -1,0 +1,14 @@
+relations:
+  - tests
+  - supports
+  - contradicts
+  - motivated-by
+  - derived-from
+  - uses-method
+  - uses-model
+  - uses-dataset
+  - described-by
+  - produced
+  - continues
+  - related-to
+  - has-source
