@@ -16,7 +16,6 @@ class LibraryItemType(StrEnum):
 
 class SourceKind(StrEnum):
     TELEGRAM = "telegram"
-    CODEX = "codex"
     AUTORESEARCH = "autoresearch"
     API = "api"
     MANUAL = "manual"

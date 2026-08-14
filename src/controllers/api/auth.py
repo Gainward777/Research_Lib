@@ -15,7 +15,7 @@ async def require_read(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> None:
     settings = request.app.state.container.settings
-    configured = [settings.library_api_token, settings.library_codex_token]
+    configured = [settings.library_api_token]
     if not any(configured):
         return
     if credentials is None or not _valid(credentials.credentials, configured):

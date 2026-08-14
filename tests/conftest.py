@@ -12,7 +12,7 @@ def settings(tmp_path: Path) -> Settings:
     return Settings(
         library_data_root=tmp_path / "library",
         library_api_token="test-api-token",
-        library_codex_token="test-codex-token",
+        mcp_auth_token="test-mcp-token",
         library_gbrain_mode="local",
     )
 

@@ -12,13 +12,13 @@
 ## 1. Назначение
 
 `research-library` — самостоятельный сервис исследовательской библиотеки,
-работающий независимо от AutoResearch, Codex и RunPod.
+работающий независимо от внешних исследовательских сервисов и RunPod.
 
 Сервис должен:
 
 - принимать пересланные Telegram-сообщения с изображениями;
 - принимать обычные заметки, идеи, ссылки и публикации через Telegram;
-- принимать итоговые отчёты Codex и AutoResearch напрямую через API/MCP, без
+- принимать итоговые отчёты внешних сервисов напрямую через API/MCP, без
   Telegram;
 - хранить знания как Markdown-страницы и изображения на persistent volume;
 - использовать GBrain с PGLite для полнотекстового, векторного и графового
@@ -113,7 +113,7 @@ Library Service API / MCP facade
               +--> embeddings
               +--> graph
 
-Codex / AutoResearch
+External research service
     |
     +--> HTTPS API or MCP facade
             |
@@ -123,32 +123,27 @@ Codex / AutoResearch
             +--> library_get
 ```
 
-## 4. Может ли Codex писать напрямую
+## 4. Как внешние сервисы подключаются к библиотеке
 
-Да. Поддержать два способа.
+MCP-сервер принадлежит репозиторию `Research_Lib` и публикуется тем же
+FastAPI-процессом по endpoint `/mcp`. Он имеет доступ к той же SQLite базе,
+Markdown-файлам и persistent volume, что Telegram и REST API.
 
-### 4.1. Нативный GBrain MCP
+Внешний сервис находится в другом репозитории и содержит только MCP-клиент:
 
-GBrain HTTP MCP предоставляет `put_page` и read/write scopes. Codex может быть
-подключён к удалённому GBrain и создавать страницы без Telegram.
+```text
+External service repository
+└── MCP client ──HTTPS──> Research_Lib /mcp
+```
 
-Этот путь допустим для простых текстовых записей и ручного администрирования.
-Он не должен быть основным контрактом AutoResearch, потому что:
-
-- Codex будет зависеть от внутренней структуры GBrain page;
-- raw `put_page` не загружает RunPod-артефакты по нашему протоколу;
-- сложнее обеспечить единый idempotency key;
-- можно обойти валидацию research schema и ingestion audit.
-
-### 4.2. Library API/MCP facade — основной путь
-
-Codex вызывает узкий инструмент:
+Внутренний GBrain adapter наружу не публикуется. Основной контракт для записи
+экспериментального отчёта:
 
 ```text
 library_save_experiment_report
 ```
 
-или соответствующий REST endpoint:
+REST endpoint остаётся дополнительным интерфейсом:
 
 ```http
 POST /v1/experiment-reports
@@ -167,17 +162,9 @@ Authorization: Bearer <service-token>
 7. возвращает стабильные `library_item_id`, `slug` и ссылку на источник;
 8. при повторе того же idempotency key возвращает прежний результат.
 
-Telegram в этом потоке не участвует.
-
-### 4.3. Надёжная доставка из AutoResearch
-
-После завершения итерации AutoResearch Control Plane создаёт durable outbox
-event. Codex может отправить содержательный отчёт немедленно, а outbox повторяет
-доставку при сетевой ошибке с тем же idempotency key. Повтор не создаёт вторую
-страницу.
-
-Library Service не получает и не изменяет experiment state.
-
+Telegram в этом потоке не участвует. Отправляющий сервис отвечает за durable
+outbox и повтор доставки с тем же idempotency key. Library Service не получает
+и не изменяет внутреннее состояние эксперимента.
 ## 5. Структура brain repo
 
 ```text
@@ -492,9 +479,10 @@ GBrain think/query.
 - повтор возвращает прежний status/body;
 - несовпадающий payload с тем же ключом возвращает conflict.
 
-## 10. MCP facade и Codex skill
+## 10. MCP facade
 
-### 10.1. MCP tools
+MCP endpoint: `POST /mcp` по протоколу Streamable HTTP. При заданном
+`MCP_AUTH_TOKEN` клиент передаёт `Authorization: Bearer <token>`.
 
 Минимальный внешний набор:
 
@@ -507,37 +495,9 @@ library_save_idea               write
 library_save_publication        write
 ```
 
-Не раскрывать Codex административные schema mutations и удаление страниц.
-Raw GBrain MCP остаётся административным/диагностическим интерфейсом.
-
-### 10.2. Codex skill
-
-В новом репозитории подготовить:
-
-```text
-integrations/codex/research-library-skill/
-├── SKILL.md
-├── references/
-│   ├── experiment-report-schema.md
-│   └── retrieval-policy.md
-└── scripts/
-    └── library_client.py
-```
-
-Skill должен предписывать:
-
-- искать библиотеку перед повторным исследованием известной темы;
-- сохранять только устойчивый итог, а не routine progress;
-- сохранять отрицательные результаты;
-- передавать `experiment_id`, `iteration_id`, commit и summary параметров;
-- загружать только выбранные итоговые изображения;
-- использовать один idempotency key при retry;
-- не отправлять checkpoints, полные логи, secrets и внутренний experiment state;
-- цитировать `library_item_id` найденных источников в итоговом отчёте.
-
-На первом этапе `library_client.py` работает с REST API. После готовности MCP
-skill переключается на native tools без изменения смыслового контракта.
-
+Административные schema mutations, удаление страниц и внутренний GBrain наружу
+не раскрываются. Клиентские skills, prompts и fallback-скрипты не входят в
+репозиторий библиотеки: если они нужны, ими владеет репозиторий внешнего сервиса.
 ## 11. SQLite operational schema
 
 ```text
@@ -634,7 +594,6 @@ research-library/
 │       ├── server.py
 │       └── tools.py
 ├── schema-packs/research-v1/
-├── integrations/codex/research-library-skill/
 ├── tests/
 │   ├── unit/
 │   ├── integration/
@@ -671,7 +630,7 @@ GBrain устанавливается как отдельный pinned runtime d
 2. write/search/think round trip;
 3. restart с сохранением данных;
 4. последовательные writes из Telegram и API;
-5. remote Codex MCP read/write;
+5. remote MCP client read/write;
 6. reindex из Markdown после удаления тестового PGLite.
 
 ## 14. Конфигурация
@@ -690,7 +649,7 @@ LIBRARY_SQLITE_PATH=/data/library/library.sqlite3
 
 LIBRARY_PUBLIC_URL=
 LIBRARY_API_TOKEN=
-LIBRARY_CODEX_TOKEN=
+MCP_AUTH_TOKEN=
 
 LIBRARY_GBRAIN_COMMAND=gbrain
 LIBRARY_GBRAIN_MODE=pglite
@@ -770,11 +729,11 @@ PGLite также можно резервировать, но восстанов
 - [ ] Закрепить GBrain version/commit.
 - [ ] Проверить PGLite на persistent path.
 - [ ] Проверить `put_page`, search и think.
-- [ ] Проверить remote Codex MCP с read/write token.
+- [ ] Проверить удалённый MCP-клиент с bearer token.
 - [ ] Проверить полный rebuild из Markdown.
 - [ ] Зафиксировать способ запуска GBrain в контейнере.
 
-Критерий: после restart тестовая страница находится через search, а Codex может
+Критерий: после restart тестовая страница находится через search, а внешний MCP-клиент может
 создать вторую страницу без Telegram.
 
 ### Этап 1. Storage core
@@ -827,15 +786,15 @@ PGLite также можно резервировать, но восстанов
 Критерий: запрос по описанию находит отчёт без знания ID и возвращает исходные
 изображения.
 
-### Этап 5. Codex/AutoResearch integration
+### Этап 5. Интеграция внешних исследовательских сервисов
 
 - [ ] Реализовать MCP facade.
-- [ ] Создать Codex skill и REST fallback script.
+- [ ] Подключить MCP-клиент из отдельного репозитория.
 - [ ] Добавить typed experiment report contract.
 - [ ] Добавить multipart artifact upload.
 - [ ] Подключить AutoResearch outbox publisher.
 - [ ] Проверить retry после недоступности Library Service.
-- [ ] Ограничить Codex tools read/write без schema admin/delete.
+- [ ] Ограничить MCP tools read/write без schema admin/delete.
 
 Критерий: завершённый эксперимент появляется в библиотеке без Telegram и
 находится через библиотечного бота.
@@ -884,8 +843,8 @@ PGLite также можно резервировать, но восстанов
 - duplicate Telegram update;
 - idea and publication;
 - natural-language lookup by description;
-- Codex direct experiment report;
-- Codex artifact upload;
+- direct experiment report from an external service;
+- external service artifact upload;
 - Library restart during indexing;
 - GBrain temporarily unavailable;
 - Railway volume restart;
@@ -897,8 +856,8 @@ PGLite также можно резервировать, но восстанов
 - Идеи, публикации и отчёты получают разные page types.
 - Поиск работает по описанию, а не только по ID.
 - `/ask` формирует ответ с указанием страниц-источников.
-- Codex сохраняет отчёт напрямую через API/MCP без Telegram.
-- Повторный Codex/Telegram запрос не создаёт дубликат.
+- Внешний сервис сохраняет отчёт напрямую через API/MCP без Telegram.
+- Повторный MCP/Telegram запрос не создаёт дубликат.
 - Изображения сохраняются на volume с заданной длинной стороной.
 - Restart/redeploy не теряет Markdown, attachments и ingestion receipts.
 - Удаление PGLite не уничтожает знания; индекс перестраивается из Markdown.
@@ -932,7 +891,7 @@ PGLite также можно резервировать, но восстанов
 4. сформировать одну Markdown-страницу research-v1;
 5. вызвать GBrain indexing;
 6. реализовать `POST /v1/search`;
-7. подключить один Codex REST client;
+7. подключить один внешний MCP-клиент;
 8. доказать write → restart → search;
 9. только после этого добавлять Telegram и изображения.
 

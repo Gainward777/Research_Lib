@@ -70,3 +70,10 @@ def test_experiment_report_contract(client, auth_headers) -> None:
 def test_auth_is_required(client) -> None:
     response = client.post("/v1/search", json={"query": "anything"})
     assert response.status_code == 401
+
+    unrelated_token = client.post(
+        "/v1/search",
+        json={"query": "anything"},
+        headers={"Authorization": "Bearer unrelated-token"},
+    )
+    assert unrelated_token.status_code == 401

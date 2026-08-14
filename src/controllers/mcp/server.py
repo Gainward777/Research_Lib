@@ -1,14 +1,12 @@
-import os
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
+from starlette.applications import Starlette
 
 from controllers.mcp.item_controller import library_get
 from controllers.mcp.search_controller import library_search
 from controllers.utils.bootstrap.dependencies import build_container
 from models.experiment_report import ExperimentReport
-
-mcp = MCPServer("Research Library")
 
 
 async def dispatch(method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -66,25 +64,21 @@ async def dispatch(method: str, params: dict[str, Any]) -> dict[str, Any]:
         await container.close()
 
 
-@mcp.tool(name="library_search")
 async def library_search_tool(query: str, limit: int = 10) -> dict[str, Any]:
     """Search the research library without LLM synthesis."""
     return await dispatch("library_search", {"query": query, "limit": limit})
 
 
-@mcp.tool(name="library_get")
 async def library_get_tool(item_id_or_slug: str) -> dict[str, Any]:
     """Get one library item by stable ID or slug."""
     return await dispatch("library_get", {"item_id_or_slug": item_id_or_slug})
 
 
-@mcp.tool(name="library_get_related")
 async def library_get_related_tool(item_id_or_slug: str) -> dict[str, Any]:
     """Get explicitly related library items."""
     return await dispatch("library_get_related", {"item_id_or_slug": item_id_or_slug})
 
 
-@mcp.tool(name="library_save_experiment_report")
 async def library_save_experiment_report_tool(
     payload: dict[str, Any], idempotency_key: str
 ) -> dict[str, Any]:
@@ -95,7 +89,6 @@ async def library_save_experiment_report_tool(
     )
 
 
-@mcp.tool(name="library_save_idea")
 async def library_save_idea_tool(payload: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
     """Save a research idea."""
     return await dispatch(
@@ -103,7 +96,6 @@ async def library_save_idea_tool(payload: dict[str, Any], idempotency_key: str) 
     )
 
 
-@mcp.tool(name="library_save_publication")
 async def library_save_publication_tool(
     payload: dict[str, Any], idempotency_key: str
 ) -> dict[str, Any]:
@@ -114,5 +106,33 @@ async def library_save_publication_tool(
     )
 
 
+def create_mcp_server() -> MCPServer[Any]:
+    server = MCPServer("Research Library")
+    server.add_tool(library_search_tool, name="library_search")
+    server.add_tool(library_get_tool, name="library_get")
+    server.add_tool(library_get_related_tool, name="library_get_related")
+    server.add_tool(
+        library_save_experiment_report_tool,
+        name="library_save_experiment_report",
+    )
+    server.add_tool(library_save_idea_tool, name="library_save_idea")
+    server.add_tool(library_save_publication_tool, name="library_save_publication")
+    return server
+
+
+def create_mcp_http_app() -> tuple[MCPServer[Any], Starlette]:
+    server = create_mcp_server()
+    http_app = server.streamable_http_app(
+        streamable_http_path="/mcp",
+        json_response=True,
+        stateless_http=True,
+        host="0.0.0.0",
+    )
+    return server, http_app
+
+
+mcp = create_mcp_server()
+
+
 if __name__ == "__main__":
-    mcp.run(transport=os.getenv("LIBRARY_MCP_TRANSPORT", "stdio"))
+    mcp.run()

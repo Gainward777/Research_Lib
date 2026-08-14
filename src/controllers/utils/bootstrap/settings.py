@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     library_public_url: str = ""
     library_api_token: str = ""
-    library_codex_token: str = ""
+    mcp_auth_token: str = ""
 
     library_gbrain_mode: str = "local"
     library_gbrain_command: str = "gbrain"

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from controllers.api import (
     health_controller,
@@ -11,6 +12,8 @@ from controllers.api import (
     search_controller,
     upload_controller,
 )
+from controllers.mcp.auth import is_mcp_authorized
+from controllers.mcp.server import create_mcp_http_app
 from controllers.utils.bootstrap.lifecycle import create_lifespan
 from controllers.utils.bootstrap.settings import Settings
 from errors import IdempotencyConflictError, NotFoundError, ResearchLibraryError
@@ -18,11 +21,12 @@ from views.api.error_view import render_error
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    mcp_server, mcp_http_app = create_mcp_http_app()
     app = FastAPI(
         title="Research Library",
         version="0.1.0",
-        description="Persistent Markdown research library for Telegram, Codex and AutoResearch.",
-        lifespan=create_lifespan(settings),
+        description="Persistent Markdown research library for Telegram and external services.",
+        lifespan=create_lifespan(settings, mcp_server),
     )
     for router in (
         health_controller.router,
@@ -36,6 +40,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         schema_controller.router,
     ):
         app.include_router(router)
+    app.router.routes.extend(mcp_http_app.routes)
+
+    @app.middleware("http")
+    async def authenticate_mcp(request: Request, call_next):
+        if request.url.path.rstrip("/") == "/mcp" and not is_mcp_authorized(request):
+            return JSONResponse(
+                status_code=401,
+                content={"error": "invalid_mcp_token"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return await call_next(request)
 
     @app.exception_handler(NotFoundError)
     async def not_found_handler(_request: Request, exc: NotFoundError):

@@ -2,12 +2,12 @@
 
 ## 1. Назначение
 
-`research-library` — самостоятельный сервис исследовательской библиотеки. Он принимает материалы из Telegram, Codex и AutoResearch, сохраняет устойчивые знания и позволяет искать их или задавать вопросы на естественном языке.
+`research-library` — самостоятельный сервис исследовательской библиотеки. Он принимает материалы из Telegram и внешних исследовательских сервисов, сохраняет устойчивые знания и позволяет искать их или задавать вопросы на естественном языке.
 
 Сервис должен:
 
 - принимать Telegram-сообщения, заметки, ссылки, публикации и изображения;
-- принимать итоговые отчёты Codex и AutoResearch через REST API или MCP;
+- принимать итоговые отчёты внешних сервисов через REST API или MCP;
 - сохранять знания как Markdown-страницы с YAML frontmatter;
 - хранить вложения на persistent volume;
 - использовать GBrain с PGLite для полнотекстового, векторного и графового поиска;
@@ -192,15 +192,7 @@ research-library/
 │       │   ├── item_view.py
 │       │   ├── search_view.py
 │       │   └── error_view.py
-│       └── integrations/
-│           └── codex/
-│               └── research-library-skill/
-│                   ├── SKILL.md
-│                   ├── references/
-│                   │   ├── experiment-report-schema.md
-│                   │   └── retrieval-policy.md
-│                   └── scripts/
-│                       └── library_client.py
+
 │
 ├── scripts/
 │   ├── bootstrap_gbrain.py
@@ -299,7 +291,7 @@ FastAPI controllers для REST endpoints, авторизации и преоб�
 
 #### `controllers/mcp`
 
-Внешние MCP tools для Codex и AutoResearch.
+Внешние MCP tools для независимых исследовательских сервисов.
 
 #### `controllers/workers`
 
@@ -395,7 +387,7 @@ View преобразует готовый результат в формат к
 - `views/api` — JSON response models;
 - `views/telegram` — текст, кнопки и сообщения Telegram;
 - `views/mcp` — структурированный результат MCP tools.
-- `views/integrations` — внешние форматы и клиентские пакеты интеграций, включая Codex skill.
+- Клиентские интеграции находятся в репозиториях соответствующих MCP-клиентов.
 
 View не обращается к BD, GBrain или LLM и не меняет модели.
 
@@ -634,7 +626,10 @@ POST /v1/schema/proposals/{proposal_id}/apply
 
 Обычный текст сначала проходит детерминированный intent router. LLM вызывается только при неоднозначном намерении.
 
-## 14. MCP и Codex
+## 14. MCP
+
+MCP-сервер является частью `Research_Lib` и публикуется основным FastAPI-процессом
+по `/mcp` через Streamable HTTP. Другие репозитории содержат только MCP-клиенты.
 
 Внешние MCP tools:
 
@@ -647,18 +642,10 @@ library_save_idea
 library_save_publication
 ```
 
-Codex не получает административное применение schema mutations и удаление страниц.
-
-Codex skill должен требовать:
-
-- искать библиотеку перед повторным исследованием;
-- сохранять только устойчивые итоги;
-- сохранять отрицательные результаты;
-- передавать experiment ID, iteration ID и code revision;
-- использовать тот же idempotency key при retry;
-- не сохранять secrets, checkpoints, полные логи и внутреннее состояние эксперимента;
-- указывать `library_item_id` использованных источников.
-
+Доступ защищается нейтральным `MCP_AUTH_TOKEN`. Административное применение
+schema mutations, удаление страниц и внутренний GBrain adapter наружу не
+публикуются. Клиент отвечает за retry с тем же idempotency key и не отправляет
+secrets, checkpoints, полные логи или внутреннее состояние эксперимента.
 ## 15. Идемпотентность
 
 Форматы ключей:
@@ -734,7 +721,7 @@ LIBRARY_SQLITE_PATH=/data/library/library.sqlite3
 
 LIBRARY_PUBLIC_URL=
 LIBRARY_API_TOKEN=
-LIBRARY_CODEX_TOKEN=
+MCP_AUTH_TOKEN=
 
 LIBRARY_GBRAIN_COMMAND=gbrain
 LIBRARY_GBRAIN_MODE=pglite
@@ -766,8 +753,8 @@ LOG_LEVEL=INFO
 
 - Telegram ограничивается allowlist пользователей и чатов;
 - REST и MCP используют bearer service tokens;
-- Codex получает только необходимые read/write scopes;
-- schema admin и delete недоступны обычному Codex token;
+- MCP-клиент получает только необходимые read/write scopes;
+- schema admin и delete недоступны обычному MCP token;
 - bot/API tokens не записываются в SQLite и логи;
 - содержимое приватных материалов не логируется на INFO level;
 - MIME определяется по содержимому файла;
@@ -847,8 +834,8 @@ PGLite можно резервировать дополнительно, но в
 - duplicate Telegram update;
 - идея и публикация;
 - поиск по описанию;
-- Codex direct experiment report;
-- Codex artifact upload;
+- direct experiment report from an external service;
+- external service artifact upload;
 - restart во время indexing;
 - временная недоступность GBrain;
 - Railway volume restart;
@@ -864,7 +851,7 @@ PGLite можно резервировать дополнительно, но в
 - проверить PGLite на persistent path;
 - проверить write/search/think;
 - проверить restart и rebuild из Markdown;
-- проверить Codex read/write.
+- проверить внешний MCP client read/write.
 
 ### Этап 1. Model и BD
 
@@ -904,10 +891,10 @@ PGLite можно резервировать дополнительно, но в
 - добавить dedup;
 - добавить schema proposal workflow.
 
-### Этап 5. Codex и AutoResearch
+### Этап 5. Внешние исследовательские сервисы
 
 - реализовать MCP Controllers и Views;
-- создать Codex skill и REST fallback;
+- подключить MCP-клиент из отдельного репозитория;
 - добавить typed experiment report;
 - добавить multipart artifact upload;
 - подключить durable AutoResearch outbox;
@@ -929,7 +916,7 @@ PGLite можно резервировать дополнительно, но в
 - идеи, публикации и отчёты получают разные page types;
 - поиск работает по описанию, а не только по ID;
 - `/ask` возвращает ответ с источниками;
-- Codex сохраняет отчёт через API/MCP без Telegram;
+- Внешний сервис сохраняет отчёт через API/MCP без Telegram;
 - повторный запрос не создаёт дубликат;
 - restart/redeploy не теряет Markdown, attachments и receipts;
 - удаление PGLite не уничтожает знания;
@@ -961,7 +948,7 @@ PGLite можно резервировать дополнительно, но в
 6. Реализовать `POST /v1/items` через Controller, service и View.
 7. Индексировать созданную страницу в GBrain.
 8. Реализовать `POST /v1/search`.
-9. Подключить один Codex REST client.
+9. Подключить один внешний MCP client.
 10. Доказать сценарий write → restart → search.
 11. Только после этого добавлять Telegram и обработку изображений.
 

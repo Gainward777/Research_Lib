@@ -51,8 +51,9 @@ $body = @{
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/items -Headers $headers -ContentType application/json -Body $body
 ```
 
-Если `LIBRARY_API_TOKEN` и `LIBRARY_CODEX_TOKEN` пусты, локальный API работает без
-авторизации. В production хотя бы один токен должен быть задан.
+Если `LIBRARY_API_TOKEN` пуст, локальный REST API работает без авторизации.
+Endpoint `/mcp` защищается отдельно через `MCP_AUTH_TOKEN`. В production задайте
+оба токена, если REST API и MCP доступны по публичному домену.
 
 ## Telegram
 
@@ -62,21 +63,23 @@ Telegram polling запускается вместе с API, только есл
 
 ## MCP
 
-Локальный stdio server:
+Streamable HTTP MCP запускается внутри основного FastAPI-процесса:
+
+```powershell
+$env:PYTHONPATH = 'src'
+$env:MCP_AUTH_TOKEN = 'local-mcp-token'
+uv run uvicorn main:app --app-dir src --reload
+```
+
+MCP-клиент подключается к `http://127.0.0.1:8000/mcp` с заголовком
+`Authorization: Bearer local-mcp-token`.
+
+Для локального stdio-подключения сервер можно запустить отдельно:
 
 ```powershell
 $env:PYTHONPATH = 'src'
 uv run python src/controllers/mcp/server.py
 ```
-
-Streamable HTTP:
-
-```powershell
-$env:PYTHONPATH = 'src'
-$env:LIBRARY_MCP_TRANSPORT = 'streamable-http'
-uv run python src/controllers/mcp/server.py
-```
-
 MCP tools:
 
 - `library_search`;
