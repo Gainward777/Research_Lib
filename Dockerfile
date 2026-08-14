@@ -12,7 +12,6 @@ COPY scripts /app/scripts
 RUN pip install --no-cache-dir .
 
 RUN mkdir -p /data/library
-VOLUME ["/data"]
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
