@@ -2,31 +2,28 @@
 
 ## Локальная установка
 
-Требования: Python 3.11–3.13 и `uv`.
+Для тестов нужны Python 3.11–3.13 и `uv`. Для запуска приложения обязателен также
+GBrain `0.45.12.0`; production-образ собирает его автоматически.
 
 ```powershell
 uv sync --dev
-uv run uvicorn main:app --app-dir src --reload
+uv run pytest -q
 ```
 
-API будет доступен на `http://127.0.0.1:8000`, OpenAPI — на `/docs`.
+Полный локальный запуск без установки GBrain на хост выполняется через Docker:
 
-Файл `.env.example` содержит production-пути `/data`; для локального запуска он не обязателен.
-
-По умолчанию данные записываются в `data/library`, а поиск работает в локальном
-Markdown-режиме. Для GBrain установите pinned GBrain runtime, выполните `gbrain init`
-для каталога из `LIBRARY_GBRAIN_HOME` и задайте:
-
-```text
-LIBRARY_GBRAIN_MODE=subprocess
-LIBRARY_GBRAIN_COMMAND=gbrain
+```powershell
+docker build -t research-library .
+docker run --rm -p 8000:8000 -v research-library-data:/data --env-file .env research-library
 ```
 
-Subprocess получает только безопасный allowlist системных переменных окружения и
-`GBRAIN_HOME`; неизвестные переменные и секреты ему не проксируются.
+API будет доступен на `http://127.0.0.1:8000`, OpenAPI — на `/docs`. При запуске
+на хосте `LIBRARY_GBRAIN_COMMAND` должен указывать на pinned GBrain CLI. Приложение
+само инициализирует PGLite в `LIBRARY_GBRAIN_HOME`; Markdown-fallback отсутствует.
+Subprocess получает системный allowlist, `GBRAIN_HOME` и только ключи официальных
+GBrain provider, но не Telegram/API/MCP tokens.
 
 ## Проверка
-
 ```powershell
 uv run pytest -q
 uv run ruff check .
@@ -51,8 +48,9 @@ $body = @{
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/items -Headers $headers -ContentType application/json -Body $body
 ```
 
-Если `LIBRARY_API_TOKEN` и `LIBRARY_CODEX_TOKEN` пусты, локальный API работает без
-авторизации. В production хотя бы один токен должен быть задан.
+Если `LIBRARY_API_TOKEN` пуст, локальный REST API работает без авторизации.
+Endpoint `/mcp` защищается отдельно через `MCP_AUTH_TOKEN`. В production задайте
+оба токена, если REST API и MCP доступны по публичному домену.
 
 ## Telegram
 
@@ -60,23 +58,30 @@ Telegram polling запускается вместе с API, только есл
 Ограничьте доступ через `ALLOWED_TELEGRAM_USER_IDS` и
 `ALLOWED_TELEGRAM_CHAT_IDS`.
 
+Обычный короткий вопрос без вложений направляется в GBrain `think`; отчёты,
+forwarded messages, media groups и сбор `/collect` → `/save` сохраняются.
+Для синтеза ответа задайте `ANTHROPIC_API_KEY` или укажите
+`LIBRARY_GBRAIN_THINK_MODEL` и ключ соответствующего chat-провайдера.
+
 ## MCP
 
-Локальный stdio server:
+Streamable HTTP MCP запускается внутри основного FastAPI-процесса:
+
+```powershell
+$env:PYTHONPATH = 'src'
+$env:MCP_AUTH_TOKEN = 'local-mcp-token'
+uv run uvicorn main:app --app-dir src --reload
+```
+
+MCP-клиент подключается к `http://127.0.0.1:8000/mcp` с заголовком
+`Authorization: Bearer local-mcp-token`.
+
+Для локального stdio-подключения сервер можно запустить отдельно:
 
 ```powershell
 $env:PYTHONPATH = 'src'
 uv run python src/controllers/mcp/server.py
 ```
-
-Streamable HTTP:
-
-```powershell
-$env:PYTHONPATH = 'src'
-$env:LIBRARY_MCP_TRANSPORT = 'streamable-http'
-uv run python src/controllers/mcp/server.py
-```
-
 MCP tools:
 
 - `library_search`;

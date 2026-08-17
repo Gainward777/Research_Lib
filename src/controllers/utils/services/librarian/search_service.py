@@ -11,4 +11,4 @@ class SearchService:
         return await self.gbrain.search(command)
 
     async def ask(self, command: SearchCommand) -> AnswerResult:
-        return await self.gbrain.ask(command)
+        return await self.gbrain.think(command)

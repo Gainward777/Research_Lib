@@ -12,12 +12,11 @@ where = ["src"]
 [tool.setuptools.package-data]
 "controllers.utils.BD.migrations" = ["versions/*.sql"]
 "controllers.utils" = ["schema-packs/**/*.yaml", "schema-packs/**/*.md"]
-views = ["integrations/**/*.md"]
 
 [project]
 name = "research-library"
 version = "0.1.0"
-description = "Persistent research library for Telegram, Codex and AutoResearch"
+description = "Persistent research library for Telegram and external research services"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [

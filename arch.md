@@ -2,12 +2,12 @@
 
 ## 1. Назначение
 
-`research-library` — самостоятельный сервис исследовательской библиотеки. Он принимает материалы из Telegram, Codex и AutoResearch, сохраняет устойчивые знания и позволяет искать их или задавать вопросы на естественном языке.
+`research-library` — самостоятельный сервис исследовательской библиотеки. Он принимает материалы из Telegram и внешних исследовательских сервисов, сохраняет устойчивые знания и позволяет искать их или задавать вопросы на естественном языке.
 
 Сервис должен:
 
 - принимать Telegram-сообщения, заметки, ссылки, публикации и изображения;
-- принимать итоговые отчёты Codex и AutoResearch через REST API или MCP;
+- принимать итоговые отчёты внешних сервисов через REST API или MCP;
 - сохранять знания как Markdown-страницы с YAML frontmatter;
 - хранить вложения на persistent volume;
 - использовать GBrain с PGLite для полнотекстового, векторного и графового поиска;
@@ -192,15 +192,7 @@ research-library/
 │       │   ├── item_view.py
 │       │   ├── search_view.py
 │       │   └── error_view.py
-│       └── integrations/
-│           └── codex/
-│               └── research-library-skill/
-│                   ├── SKILL.md
-│                   ├── references/
-│                   │   ├── experiment-report-schema.md
-│                   │   └── retrieval-policy.md
-│                   └── scripts/
-│                       └── library_client.py
+
 │
 ├── scripts/
 │   ├── bootstrap_gbrain.py
@@ -299,7 +291,7 @@ FastAPI controllers для REST endpoints, авторизации и преоб�
 
 #### `controllers/mcp`
 
-Внешние MCP tools для Codex и AutoResearch.
+Внешние MCP tools для независимых исследовательских сервисов.
 
 #### `controllers/workers`
 
@@ -365,8 +357,7 @@ Infrastructure содержит адаптеры конкретных внешн
 
 - управление GBrain subprocess;
 - сериализованная очередь mutating-операций GBrain;
-- вызовы `search` и `think/query`;
-- LLM client;
+- вызовы GBrain `search`, `query` и `think`;
 - скачивание Telegram-файлов;
 - atomic file writer;
 - сжатие и нормализация изображений.
@@ -395,7 +386,7 @@ View преобразует готовый результат в формат к
 - `views/api` — JSON response models;
 - `views/telegram` — текст, кнопки и сообщения Telegram;
 - `views/mcp` — структурированный результат MCP tools.
-- `views/integrations` — внешние форматы и клиентские пакеты интеграций, включая Codex skill.
+- Клиентские интеграции находятся в репозиториях соответствующих MCP-клиентов.
 
 View не обращается к BD, GBrain или LLM и не меняет модели.
 
@@ -481,7 +472,7 @@ received
 2. `idempotency_service` проверяет ключ и payload hash.
 3. Исходный текст и receipt фиксируются в SQLite.
 4. Вложения скачиваются во временные файлы.
-5. Материал классифицируется детерминированными правилами или bounded LLM fallback.
+5. Материал классифицируется консервативными детерминированными правилами.
 6. Создаётся Model библиотечного материала.
 7. Вложения записываются атомарно.
 8. Markdown/frontmatter записывается через temporary file и atomic rename.
@@ -569,7 +560,8 @@ Pipeline изображения:
 GBrain используется как производный поисковый слой:
 
 - `search` — retrieval без LLM-синтеза;
-- `think/query` — ответ с синтезом и источниками;
+- `query` — расширенный retrieval без синтеза;
+- `think` — LLM-синтез ответа с источниками;
 - PGLite хранится на persistent volume;
 - версия или commit GBrain закрепляется в репозитории;
 - все mutating-операции проходят через одну очередь;
@@ -610,7 +602,7 @@ POST /v1/schema/proposals/{proposal_id}/apply
 
 - forwarded message с caption и изображениями;
 - media group по `media_group_id`;
-- `/collect` → `/save`;
+- `/collect` → `/save`, включая текст, фото и документы;
 - `/idea <text>`;
 - `/paper <url-or-text>`;
 - `/save <text>`;
@@ -632,9 +624,15 @@ POST /v1/schema/proposals/{proposal_id}/apply
 /health
 ```
 
-Обычный текст сначала проходит детерминированный intent router. LLM вызывается только при неоднозначном намерении.
+Обычный текст проходит консервативный intent router: явный короткий вопрос без
+вложений направляется в GBrain `think`, а forwarded/media, отчёты, длинные
+многострочные сообщения и неоднозначный текст сохраняются. Это исключает потерю
+материала из-за ошибочной классификации.
 
-## 14. MCP и Codex
+## 14. MCP
+
+MCP-сервер является частью `Research_Lib` и публикуется основным FastAPI-процессом
+по `/mcp` через Streamable HTTP. Другие репозитории содержат только MCP-клиенты.
 
 Внешние MCP tools:
 
@@ -647,18 +645,10 @@ library_save_idea
 library_save_publication
 ```
 
-Codex не получает административное применение schema mutations и удаление страниц.
-
-Codex skill должен требовать:
-
-- искать библиотеку перед повторным исследованием;
-- сохранять только устойчивые итоги;
-- сохранять отрицательные результаты;
-- передавать experiment ID, iteration ID и code revision;
-- использовать тот же idempotency key при retry;
-- не сохранять secrets, checkpoints, полные логи и внутреннее состояние эксперимента;
-- указывать `library_item_id` использованных источников.
-
+Доступ защищается нейтральным `MCP_AUTH_TOKEN`. Административное применение
+schema mutations, удаление страниц и внутренний GBrain adapter наружу не
+публикуются. Клиент отвечает за retry с тем же idempotency key и не отправляет
+secrets, checkpoints, полные логи или внутреннее состояние эксперимента.
 ## 15. Идемпотентность
 
 Форматы ключей:
@@ -734,18 +724,20 @@ LIBRARY_SQLITE_PATH=/data/library/library.sqlite3
 
 LIBRARY_PUBLIC_URL=
 LIBRARY_API_TOKEN=
-LIBRARY_CODEX_TOKEN=
+MCP_AUTH_TOKEN=
 
 LIBRARY_GBRAIN_COMMAND=gbrain
-LIBRARY_GBRAIN_MODE=pglite
 LIBRARY_GBRAIN_HOME=/data/library/gbrain
-LIBRARY_GBRAIN_VERSION=
-LIBRARY_GBRAIN_TIMEOUT_SECONDS=30
-
-LIBRARIAN_LLM_BASE_URL=
-LIBRARIAN_LLM_API_KEY=
-LIBRARIAN_LLM_MODEL=
-LIBRARIAN_LLM_TIMEOUT_SECONDS=60
+LIBRARY_GBRAIN_VERSION=0.45.12.0
+LIBRARY_GBRAIN_TIMEOUT_SECONDS=120
+LIBRARY_GBRAIN_NO_EMBEDDING=true
+LIBRARY_GBRAIN_EMBEDDING_MODEL=
+LIBRARY_GBRAIN_EMBEDDING_DIMENSIONS=
+LIBRARY_GBRAIN_THINK_MODEL=
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+ZEROENTROPY_API_KEY=
+VOYAGE_API_KEY=
 
 LIBRARY_IMAGE_MAX_LONG_SIDE_PX=2048
 LIBRARY_IMAGE_FORMAT=webp
@@ -761,13 +753,16 @@ LOG_LEVEL=INFO
 ```
 
 Настройки валидируются до запуска зависимых компонентов. Неизвестные переменные окружения не передаются GBrain subprocess.
+Для ответов нужен ключ chat-провайдера. По умолчанию GBrain использует Anthropic;
+для другого провайдера задаются `LIBRARY_GBRAIN_THINK_MODEL` и соответствующий
+provider key.
 
 ## 19. Безопасность
 
 - Telegram ограничивается allowlist пользователей и чатов;
 - REST и MCP используют bearer service tokens;
-- Codex получает только необходимые read/write scopes;
-- schema admin и delete недоступны обычному Codex token;
+- MCP-клиент получает только необходимые read/write scopes;
+- schema admin и delete недоступны обычному MCP token;
 - bot/API tokens не записываются в SQLite и логи;
 - содержимое приватных материалов не логируется на INFO level;
 - MIME определяется по содержимому файла;
@@ -784,7 +779,7 @@ LOG_LEVEL=INFO
 - `/readyz` проверяет writable volume, SQLite migrations и GBrain;
 - graceful shutdown завершает активную SQLite transaction;
 - во время shutdown не запускаются новые mutating GBrain jobs;
-- GBrain не обновляется без изменения pinned version.
+- GBrain 0.45.12.0 собирается из commit `7fdcd8bd2ee0b3546b167da14cddd27eb2507212` и не обновляется без изменения pin в Dockerfile.
 
 Резервировать обязательно:
 
@@ -847,8 +842,8 @@ PGLite можно резервировать дополнительно, но в
 - duplicate Telegram update;
 - идея и публикация;
 - поиск по описанию;
-- Codex direct experiment report;
-- Codex artifact upload;
+- direct experiment report from an external service;
+- external service artifact upload;
 - restart во время indexing;
 - временная недоступность GBrain;
 - Railway volume restart;
@@ -864,7 +859,7 @@ PGLite можно резервировать дополнительно, но в
 - проверить PGLite на persistent path;
 - проверить write/search/think;
 - проверить restart и rebuild из Markdown;
-- проверить Codex read/write.
+- проверить внешний MCP client read/write.
 
 ### Этап 1. Model и BD
 
@@ -897,17 +892,14 @@ PGLite можно резервировать дополнительно, но в
 
 ### Этап 4. Librarian
 
-- реализовать intent service;
-- добавить bounded LLM fallback;
-- подключить GBrain search и think;
-- добавить источники и related items;
-- добавить dedup;
-- добавить schema proposal workflow.
+- intent service, GBrain search/think и источники реализованы;
+- related items и schema proposal workflow реализованы;
+- dedup по URL/content similarity остаётся следующим этапом.
 
-### Этап 5. Codex и AutoResearch
+### Этап 5. Внешние исследовательские сервисы
 
 - реализовать MCP Controllers и Views;
-- создать Codex skill и REST fallback;
+- подключить MCP-клиент из отдельного репозитория;
 - добавить typed experiment report;
 - добавить multipart artifact upload;
 - подключить durable AutoResearch outbox;
@@ -929,7 +921,7 @@ PGLite можно резервировать дополнительно, но в
 - идеи, публикации и отчёты получают разные page types;
 - поиск работает по описанию, а не только по ID;
 - `/ask` возвращает ответ с источниками;
-- Codex сохраняет отчёт через API/MCP без Telegram;
+- Внешний сервис сохраняет отчёт через API/MCP без Telegram;
 - повторный запрос не создаёт дубликат;
 - restart/redeploy не теряет Markdown, attachments и receipts;
 - удаление PGLite не уничтожает знания;
@@ -961,7 +953,7 @@ PGLite можно резервировать дополнительно, но в
 6. Реализовать `POST /v1/items` через Controller, service и View.
 7. Индексировать созданную страницу в GBrain.
 8. Реализовать `POST /v1/search`.
-9. Подключить один Codex REST client.
+9. Подключить один внешний MCP client.
 10. Доказать сценарий write → restart → search.
 11. Только после этого добавлять Telegram и обработку изображений.
 

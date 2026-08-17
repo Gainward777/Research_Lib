@@ -9,7 +9,10 @@ async def main() -> None:
         healthy = await container.gbrain.health()
         if not healthy:
             raise SystemExit("GBrain health check failed")
-        print(f"GBrain mode '{container.settings.library_gbrain_mode}' is ready")
+        print(
+            f"GBrain {container.settings.library_gbrain_version} is ready "
+            f"at {container.settings.library_gbrain_home}"
+        )
     finally:
         await container.close()
 

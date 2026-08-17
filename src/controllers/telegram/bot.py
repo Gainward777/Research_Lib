@@ -21,13 +21,11 @@ from controllers.telegram.extra_command_controller import (
 )
 from controllers.telegram.media_controller import save_media_messages
 from controllers.telegram.media_group_controller import MediaGroupCollector
-from controllers.telegram.message_controller import save_message
+from controllers.telegram.message_controller import handle_message as route_message
 from controllers.telegram.router import is_allowed
 from controllers.utils.bootstrap.dependencies import ApplicationContainer
-from controllers.utils.services.librarian.intent_service import Intent, classify_intent
-from models.commands import SearchCommand
-from views.telegram.answer_view import render_answer
 from views.telegram.error_view import render_error
+from views.telegram.message_view import split_message
 
 Handler = Callable[[Message, ApplicationContainer], Awaitable[str]]
 
@@ -46,7 +44,9 @@ class TelegramBotRunner:
         if not is_allowed(message, self.container.settings):
             return
         try:
-            await message.answer(await handler(message, self.container))
+            response = await handler(message, self.container)
+            for chunk in split_message(response):
+                await message.answer(chunk)
         except Exception as exc:
             await message.answer(render_error(str(exc)))
 
@@ -86,7 +86,7 @@ class TelegramBotRunner:
             await self._guarded(message, save_one)
 
         @self.dispatcher.message(F.text | F.caption)
-        async def handle_message(message: Message) -> None:
+        async def handle_text_message(message: Message) -> None:
             if not is_allowed(message, self.container.settings):
                 return
             text = message.text or message.caption or ""
@@ -95,11 +95,7 @@ class TelegramBotRunner:
                 count = await collections.add(message.chat.id, text)
                 await message.answer(f"Добавлено в сбор: {count}")
                 return
-            if classify_intent(text) == Intent.ASK:
-                result = await self.container.search.ask(SearchCommand(query=text, synthesize=True))
-                await message.answer(render_answer(result))
-                return
-            await self._guarded(message, save_message)
+            await self._guarded(message, route_message)
 
     def _register_command(self, command_name: str, handler: Handler) -> None:
         async def callback(message: Message) -> None:

@@ -2,6 +2,7 @@ from io import BytesIO
 
 from aiogram.types import Message
 
+from controllers.telegram.collection_store import CollectionStore
 from controllers.utils.bootstrap.dependencies import ApplicationContainer
 from controllers.utils.services.ingestion.classifier import classify_material
 from models.commands import CreateItemCommand
@@ -44,6 +45,11 @@ async def save_media_messages(messages: list[Message], container: ApplicationCon
     content = "\n\n".join(captions)
     title = next((line.strip() for line in content.splitlines() if line.strip()), "Telegram media")
     first = messages[0]
+    collections = CollectionStore(container.database)
+    if await collections.is_active(first.chat.id):
+        count = await collections.add(first.chat.id, content, upload_ids)
+        return f"Добавлено в сбор: {count}"
+
     if first.media_group_id:
         external_id = f"telegram-group:{first.chat.id}:{first.media_group_id}"
     else:
