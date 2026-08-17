@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_GBRAIN_VERSION = "0.45.12.0"
@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     allowed_telegram_user_ids: list[int] = Field(default_factory=list)
     allowed_telegram_chat_ids: list[int] = Field(default_factory=list)
+
+    openai_api_key: SecretStr = SecretStr("")
+    library_router_model: str = "gpt-4.1-mini"
+    library_router_timeout_seconds: float = Field(default=30, gt=0)
+    library_router_context_turns: int = Field(default=12, ge=0, le=100)
 
     library_data_root: Path = Path("data/library")
     library_brain_root: Path | None = None
@@ -72,6 +77,10 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "LIBRARY_GBRAIN_EMBEDDING_DIMENSIONS is required when embeddings are enabled"
                 )
+        if self.telegram_bot_token and not self.openai_api_key.get_secret_value():
+            raise ValueError("OPENAI_API_KEY is required when TELEGRAM_BOT_TOKEN is configured")
+        if not self.library_router_model:
+            raise ValueError("LIBRARY_ROUTER_MODEL must not be empty")
         return self
 
     def model_post_init(self, __context: object) -> None:

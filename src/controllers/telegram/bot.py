@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from controllers.telegram.collection_store import CollectionStore
+from controllers.telegram.action_controller import route_natural_messages
 from controllers.telegram.command_controller import ask_command, idea_command, search_command
 from controllers.telegram.extra_command_controller import (
     cancel_command,
@@ -19,7 +19,6 @@ from controllers.telegram.extra_command_controller import (
     save_collection_command,
     schema_command,
 )
-from controllers.telegram.media_controller import save_media_messages
 from controllers.telegram.media_group_controller import MediaGroupCollector
 from controllers.telegram.message_controller import handle_message as route_message
 from controllers.telegram.router import is_allowed
@@ -40,13 +39,15 @@ class TelegramBotRunner:
         self.media_tasks: set[asyncio.Task[None]] = set()
         self._register_handlers()
 
+    async def _answer(self, message: Message, response: str) -> None:
+        for chunk in split_message(response):
+            await message.answer(chunk)
+
     async def _guarded(self, message: Message, handler: Handler) -> None:
         if not is_allowed(message, self.container.settings):
             return
         try:
-            response = await handler(message, self.container)
-            for chunk in split_message(response):
-                await message.answer(chunk)
+            await self._answer(message, await handler(message, self.container))
         except Exception as exc:
             await message.answer(render_error(str(exc)))
 
@@ -80,21 +81,13 @@ class TelegramBotRunner:
 
         @self.dispatcher.message(F.photo | F.document)
         async def handle_media(message: Message) -> None:
-            async def save_one(current: Message, container: ApplicationContainer) -> str:
-                return await save_media_messages([current], container)
+            async def route_one(current: Message, container: ApplicationContainer) -> str:
+                return await route_natural_messages([current], container)
 
-            await self._guarded(message, save_one)
+            await self._guarded(message, route_one)
 
         @self.dispatcher.message(F.text | F.caption)
         async def handle_text_message(message: Message) -> None:
-            if not is_allowed(message, self.container.settings):
-                return
-            text = message.text or message.caption or ""
-            collections = CollectionStore(self.container.database)
-            if await collections.is_active(message.chat.id):
-                count = await collections.add(message.chat.id, text)
-                await message.answer(f"Добавлено в сбор: {count}")
-                return
             await self._guarded(message, route_message)
 
     def _register_command(self, command_name: str, handler: Handler) -> None:
@@ -109,7 +102,10 @@ class TelegramBotRunner:
         if not messages:
             return
         try:
-            await response_message.answer(await save_media_messages(messages, self.container))
+            await self._answer(
+                response_message,
+                await route_natural_messages(messages, self.container),
+            )
         except Exception as exc:
             await response_message.answer(render_error(str(exc)))
 

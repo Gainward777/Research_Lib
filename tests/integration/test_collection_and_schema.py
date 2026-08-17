@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from controllers.telegram.collection_store import CollectionStore
+from controllers.utils.BD.collections import CollectionStore
 from controllers.utils.bootstrap.dependencies import build_container
 from controllers.utils.bootstrap.settings import Settings
 from tests.fakes import FakeGBrainAdapter

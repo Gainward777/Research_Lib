@@ -2,6 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from controllers.utils.BD.attachments import AttachmentStore
+from controllers.utils.BD.collections import CollectionStore
 from controllers.utils.BD.jobs import JobStore
 from controllers.utils.BD.markdown import MarkdownItemRepository
 from controllers.utils.BD.migrations import apply_migrations
@@ -10,8 +11,10 @@ from controllers.utils.BD.sqlite import Database
 from controllers.utils.bootstrap.settings import Settings
 from controllers.utils.infrastructure.gbrain.adapter import GBrainAdapter
 from controllers.utils.infrastructure.gbrain.schema_installer import install_research_schema
+from controllers.utils.infrastructure.llm.openai_responses import OpenAIResponsesClient
 from controllers.utils.services.ingestion.ingestion_service import IngestionService
 from controllers.utils.services.ingestion.job_service import JobService
+from controllers.utils.services.librarian.dialog_context import DialogContextStore
 from controllers.utils.services.librarian.search_service import SearchService
 from controllers.utils.services.library.idea_service import IdeaService
 from controllers.utils.services.library.item_service import ItemService
@@ -19,6 +22,9 @@ from controllers.utils.services.library.publication_service import PublicationSe
 from controllers.utils.services.library.relation_service import RelationService
 from controllers.utils.services.library.report_service import ReportService
 from controllers.utils.services.schema.proposal_service import ProposalService
+from controllers.utils.skills.library import build_library_skill_registry
+from controllers.utils.skills.registry import SkillRegistry
+from controllers.utils.skills.router import NaturalLanguageRouter
 
 GBrainFactory = Callable[[MarkdownItemRepository], GBrainAdapter]
 
@@ -39,6 +45,11 @@ class ApplicationContainer:
     jobs: JobService
     proposals: ProposalService
     ingestion: IngestionService
+
+    collections: CollectionStore
+    dialog_context: DialogContextStore
+    skills: SkillRegistry
+    router: NaturalLanguageRouter
 
     async def close(self) -> None:
         await self.database.close()
@@ -92,6 +103,17 @@ async def build_container(
             gbrain.mark_bootstrap_complete()
 
         items = ItemService(repository, attachments, receipts, jobs_store, gbrain)
+        skills = build_library_skill_registry()
+        collections = CollectionStore(database)
+        dialog_context = DialogContextStore(settings.library_router_context_turns)
+        router = NaturalLanguageRouter(
+            OpenAIResponsesClient(
+                settings.openai_api_key.get_secret_value(),
+                model=settings.library_router_model,
+                timeout_seconds=settings.library_router_timeout_seconds,
+            ),
+            skills,
+        )
         return ApplicationContainer(
             settings=settings,
             database=database,
@@ -107,6 +129,10 @@ async def build_container(
             jobs=JobService(jobs_store),
             proposals=ProposalService(database, settings.library_schema_mutation_mode),
             ingestion=IngestionService(items),
+            collections=collections,
+            dialog_context=dialog_context,
+            skills=skills,
+            router=router,
         )
     except Exception:
         await database.close()

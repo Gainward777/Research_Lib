@@ -100,10 +100,12 @@ research-library/
 │   │   ├── telegram/
 │   │   │   ├── bot.py
 │   │   │   ├── router.py
+│   │   │   ├── action_controller.py
 │   │   │   ├── message_controller.py
 │   │   │   ├── command_controller.py
-│   │   │   ├── media_group_controller.py
-│   │   │   └── collection_controller.py
+│   │   │   ├── extra_command_controller.py
+│   │   │   ├── media_controller.py
+│   │   │   └── media_group_controller.py
 │   │   │
 │   │   ├── mcp/
 │   │   │   ├── server.py
@@ -130,7 +132,7 @@ research-library/
 │   │       │   │   ├── publication_service.py
 │   │       │   │   └── relation_service.py
 │   │       │   ├── librarian/
-│   │       │   │   ├── intent_service.py
+│   │       │   │   ├── dialog_context.py
 │   │       │   │   ├── enrichment_service.py
 │   │       │   │   ├── search_service.py
 │   │       │   │   └── answer_service.py
@@ -142,6 +144,7 @@ research-library/
 │   │       │   ├── __init__.py
 │   │       │   ├── markdown.py
 │   │       │   ├── sqlite.py
+│   │       │   ├── collections.py
 │   │       │   ├── attachments.py
 │   │       │   ├── receipts.py
 │   │       │   ├── jobs.py
@@ -158,7 +161,7 @@ research-library/
 │   │       │   │   ├── queue.py
 │   │       │   │   └── schema_loader.py
 │   │       │   ├── llm/
-│   │       │   │   └── client.py
+│   │       │   │   └── openai_responses.py
 │   │       │   ├── telegram/
 │   │       │   │   └── file_downloader.py
 │   │       │   └── filesystem/
@@ -169,6 +172,11 @@ research-library/
 │   │       │   ├── settings.py
 │   │       │   ├── dependencies.py
 │   │       │   └── lifecycle.py
+│   │       ├── skills/
+│   │       │   ├── models.py
+│   │       │   ├── registry.py
+│   │       │   ├── router.py
+│   │       │   └── library.py
 │   │       └── schema-packs/
 │   │           └── research-v1/
 │   │               ├── schema.yaml
@@ -313,7 +321,21 @@ FastAPI controllers для REST endpoints, авторизации и преоб�
 
 Один сценарий должен быть общим для REST, Telegram и MCP. Различается только входной Controller и выходной View.
 
-### 5.4. `controllers/utils/BD`
+### 5.4. `controllers/utils/skills`
+
+Зарегистрированные прикладные скиллы являются единственной точкой выполнения
+пользовательских действий Telegram. Минимальный каталог:
+
+- `ask_library`, `search_library`, `save_material`;
+- `collect_material`, `append_collection`, `finish_collection`, `cancel_collection`;
+- скиллы чтения item/relations/recent, schema proposals и health.
+
+`router.py` получает исходный текст, метаданные вложений и Telegram, контекст
+диалога и состояние collection. Он возвращает только строгий выбор скилла и
+аргументы либо вопрос для уточнения. Роутер не отвечает пользователю, не вызывает
+GBrain и не сохраняет материалы.
+
+### 5.5. `controllers/utils/BD`
 
 `BD` отвечает за постоянное и операционное хранение:
 
@@ -322,6 +344,7 @@ FastAPI controllers для REST endpoints, авторизации и преоб�
 - `attachments.py` — хранение вложений;
 - `receipts.py` — idempotency receipts и payload hashes;
 - `jobs.py` — состояние ingestion и retry;
+- `collections.py` — состояние составного Telegram-материала;
 - `migrations/` — все миграции и механизм их применения.
 
 Никакие миграции не размещаются вне `controllers/utils/BD/migrations`.
@@ -351,18 +374,20 @@ schema_proposals
 
 SQLite работает в WAL mode через одну async write queue.
 
-### 5.5. `controllers/utils/infrastructure`
+### 5.6. `controllers/utils/infrastructure`
 
 Infrastructure содержит адаптеры конкретных внешних технологий:
 
 - управление GBrain subprocess;
 - сериализованная очередь mutating-операций GBrain;
 - вызовы GBrain `search`, `query` и `think`;
+- обычный OpenAI Responses API-вызов со Structured Outputs только для выбора
+  прикладного скилла;
 - скачивание Telegram-файлов;
 - atomic file writer;
 - сжатие и нормализация изображений.
 
-### 5.6. `controllers/utils/bootstrap`
+### 5.7. `controllers/utils/bootstrap`
 
 Bootstrap подготавливает приложение к работе:
 
@@ -371,15 +396,15 @@ Bootstrap подготавливает приложение к работе:
 3. подключает SQLite;
 4. применяет миграции из `BD/migrations`;
 5. запускает GBrain;
-6. создаёт services и передаёт им зависимости;
+6. создаёт services, каталог скиллов и LLM-роутер и передаёт им зависимости;
 7. запускает REST API, Telegram polling и workers;
 8. выполняет graceful shutdown.
 
-### 5.7. `controllers/utils/schema-packs`
+### 5.8. `controllers/utils/schema-packs`
 
 Schema packs содержат декларативные типы, связи, правила валидации и шаблоны Markdown-страниц для GBrain. Начальная схема хранится в `controllers/utils/schema-packs/research-v1`.
 
-### 5.8. `views`
+### 5.9. `views`
 
 View преобразует готовый результат в формат конкретного интерфейса:
 
@@ -624,10 +649,25 @@ POST /v1/schema/proposals/{proposal_id}/apply
 /health
 ```
 
-Обычный текст проходит консервативный intent router: явный короткий вопрос без
-вложений направляется в GBrain `think`, а forwarded/media, отчёты, длинные
-многострочные сообщения и неоднозначный текст сохраняются. Это исключает потерю
-материала из-за ошибочной классификации.
+Все команды являются необязательными алиасами зарегистрированных скиллов. Обычный
+текст, caption, forwarded message, фото, документ и собранный album передаются в
+LLM-роутер вместе с Telegram-метаданными и контекстом диалога.
+
+Правила выполнения:
+
+- обычный вопрос и `/ask` вызывают один `ask_library`;
+- `ask_library` передаёт GBrain исходный вопрос, а ответ GBrain отправляется без
+  дополнений, источников и переформатирования; допустимо только точное разбиение
+  по лимиту Telegram;
+- любой отчёт, пересланный или написанный боту напрямую, сохраняется только через
+  `save_material`, включая текст, фотографии, albums и документы;
+- `collect_material` начинает накопление, `append_collection` добавляет очередное
+  сообщение, `finish_collection` вызывает `save_material` один раз для всего набора;
+- естественные фразы начала и завершения collection равноправны slash-алиасам;
+- при неоднозначном намерении возвращается уточняющий вопрос без поиска и записи.
+
+Модель роутера по умолчанию — `gpt-4.1-mini`. Это отдельный обычный OpenAI API-вызов,
+не Codex и не MCP. MCP подключается к библиотеке только как внешний интерфейс.
 
 ## 14. MCP
 
@@ -716,6 +756,11 @@ LIBRARY_SCHEMA_MUTATION_MODE=propose
 TELEGRAM_BOT_TOKEN=
 ALLOWED_TELEGRAM_USER_IDS=
 ALLOWED_TELEGRAM_CHAT_IDS=
+OPENAI_API_KEY=
+LIBRARY_ROUTER_MODEL=gpt-4.1-mini
+LIBRARY_ROUTER_TIMEOUT_SECONDS=30
+LIBRARY_ROUTER_CONTEXT_TURNS=12
+
 
 LIBRARY_DATA_ROOT=/data/library
 LIBRARY_BRAIN_ROOT=/data/library/brain
@@ -735,7 +780,6 @@ LIBRARY_GBRAIN_EMBEDDING_MODEL=
 LIBRARY_GBRAIN_EMBEDDING_DIMENSIONS=
 LIBRARY_GBRAIN_THINK_MODEL=
 ANTHROPIC_API_KEY=
-OPENAI_API_KEY=
 ZEROENTROPY_API_KEY=
 VOYAGE_API_KEY=
 
@@ -752,10 +796,14 @@ LIBRARY_JOB_POLL_SECONDS=1
 LOG_LEVEL=INFO
 ```
 
-Настройки валидируются до запуска зависимых компонентов. Неизвестные переменные окружения не передаются GBrain subprocess.
-Для ответов нужен ключ chat-провайдера. По умолчанию GBrain использует Anthropic;
-для другого провайдера задаются `LIBRARY_GBRAIN_THINK_MODEL` и соответствующий
-provider key.
+`OPENAI_API_KEY` обязателен при включённом Telegram и используется LLM-роутером
+через Responses API. `LIBRARY_ROUTER_MODEL` по умолчанию равен `gpt-4.1-mini`.
+Этот вызов не запускает Codex и не использует MCP.
+
+Для ответов `ask_library` нужен отдельный chat-provider GBrain. По умолчанию
+GBrain использует Anthropic; для другого провайдера задаются
+`LIBRARY_GBRAIN_THINK_MODEL` и соответствующий provider key. Неизвестные переменные
+окружения не передаются GBrain subprocess.
 
 ## 19. Безопасность
 
@@ -812,7 +860,8 @@ PGLite можно резервировать дополнительно, но в
 
 - Model validation;
 - idempotency key и payload hash;
-- Telegram intent classification;
+- строгий контракт LLM-роутера и clarification;
+- регистрация и аргументы Telegram-скиллов;
 - media group aggregation;
 - Markdown/frontmatter generation;
 - slug normalization;
@@ -820,7 +869,8 @@ PGLite можно резервировать дополнительно, но в
 - schema validation;
 - retry state machine;
 - View rendering;
-- Controller-to-service mapping.
+- Controller-to-skill mapping;
+- точное сохранение всех символов GBrain-ответа при Telegram splitting.
 
 ### Integration
 
@@ -892,7 +942,8 @@ PGLite можно резервировать дополнительно, но в
 
 ### Этап 4. Librarian
 
-- intent service, GBrain search/think и источники реализованы;
+- LLM-роутер и каталог прикладных скиллов реализованы;
+- GBrain search/think и точный passthrough ответа реализованы;
 - related items и schema proposal workflow реализованы;
 - dedup по URL/content similarity остаётся следующим этапом.
 
@@ -920,7 +971,7 @@ PGLite можно резервировать дополнительно, но в
 - Telegram-forward с изображениями сохраняется без OCR;
 - идеи, публикации и отчёты получают разные page types;
 - поиск работает по описанию, а не только по ID;
-- `/ask` возвращает ответ с источниками;
+- `/ask` и естественный вопрос возвращают неизменённый текст ответа GBrain;
 - Внешний сервис сохраняет отчёт через API/MCP без Telegram;
 - повторный запрос не создаёт дубликат;
 - restart/redeploy не теряет Markdown, attachments и receipts;

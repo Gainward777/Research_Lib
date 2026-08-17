@@ -19,4 +19,4 @@ def test_long_telegram_answer_is_split_without_data_loss() -> None:
     chunks = split_message(text, limit=200)
 
     assert all(len(chunk) <= 200 for chunk in chunks)
-    assert " ".join(" ".join(chunks).split()) == " ".join(text.split())
+    assert "".join(chunks) == text

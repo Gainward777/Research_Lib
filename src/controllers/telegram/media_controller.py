@@ -2,12 +2,7 @@ from io import BytesIO
 
 from aiogram.types import Message
 
-from controllers.telegram.collection_store import CollectionStore
 from controllers.utils.bootstrap.dependencies import ApplicationContainer
-from controllers.utils.services.ingestion.classifier import classify_material
-from models.commands import CreateItemCommand
-from models.enums import SourceKind
-from views.telegram.receipt_view import render_saved
 
 
 async def _upload_message_media(message: Message, container: ApplicationContainer) -> str | None:
@@ -31,38 +26,12 @@ async def _upload_message_media(message: Message, container: ApplicationContaine
     return str(result["upload_id"])
 
 
-async def save_media_messages(messages: list[Message], container: ApplicationContainer) -> str:
-    if not messages:
-        raise ValueError("Empty Telegram media group")
-    upload_ids = []
-    captions = []
+async def upload_message_media(
+    messages: list[Message], container: ApplicationContainer
+) -> list[str]:
+    upload_ids: list[str] = []
     for message in messages:
-        if message.caption:
-            captions.append(message.caption)
         upload_id = await _upload_message_media(message, container)
         if upload_id:
             upload_ids.append(upload_id)
-    content = "\n\n".join(captions)
-    title = next((line.strip() for line in content.splitlines() if line.strip()), "Telegram media")
-    first = messages[0]
-    collections = CollectionStore(container.database)
-    if await collections.is_active(first.chat.id):
-        count = await collections.add(first.chat.id, content, upload_ids)
-        return f"Добавлено в сбор: {count}"
-
-    if first.media_group_id:
-        external_id = f"telegram-group:{first.chat.id}:{first.media_group_id}"
-    else:
-        external_id = f"telegram:{first.chat.id}:{first.message_id}"
-    result = await container.ingestion.ingest(
-        CreateItemCommand(
-            type=classify_material(content),
-            title=title[:300],
-            content=content,
-            source_kind=SourceKind.TELEGRAM,
-            source_external_id=external_id,
-            attachment_upload_ids=upload_ids,
-        ),
-        idempotency_key=external_id,
-    )
-    return render_saved(result, title)
+    return upload_ids

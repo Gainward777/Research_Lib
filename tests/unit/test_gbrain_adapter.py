@@ -172,7 +172,7 @@ async def test_think_returns_synthesized_answer_with_library_sources(tmp_path: P
     adapter = GBrainAdapter(repository, home=tmp_path, think_model="anthropic:test-model")
     adapter._run_call = AsyncMock(
         return_value={
-            "answer": "Synthesized answer.",
+            "answer": "  Synthesized answer.\nSecond line.  ",
             "synthesisOk": True,
             "citations": [{"page_slug": "ideas/example", "row_num": None}],
         }
@@ -180,5 +180,5 @@ async def test_think_returns_synthesized_answer_with_library_sources(tmp_path: P
 
     result = await adapter.think(SearchCommand(query="What is known?"))
 
-    assert result.answer == "Synthesized answer."
+    assert result.answer == "  Synthesized answer.\nSecond line.  "
     assert [source.item_id for source in result.sources] == [item.id]

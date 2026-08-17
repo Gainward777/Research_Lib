@@ -180,7 +180,8 @@ class GBrainAdapter:
             raise SearchBackendError("GBrain think returned an invalid response")
 
         synthesis_ok = result.get("synthesisOk", result.get("synthesis_ok", True))
-        answer = str(result.get("answer") or "").strip()
+        raw_answer = result.get("answer")
+        answer = raw_answer if isinstance(raw_answer, str) else ""
         if synthesis_ok is False or not answer:
             warnings = result.get("warnings")
             detail = ", ".join(map(str, warnings)) if isinstance(warnings, list) else ""

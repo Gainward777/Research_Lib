@@ -54,14 +54,18 @@ Endpoint `/mcp` защищается отдельно через `MCP_AUTH_TOKEN
 
 ## Telegram
 
-Telegram polling запускается вместе с API, только если задан `TELEGRAM_BOT_TOKEN`.
-Ограничьте доступ через `ALLOWED_TELEGRAM_USER_IDS` и
-`ALLOWED_TELEGRAM_CHAT_IDS`.
+Telegram polling запускается вместе с API, если заданы `TELEGRAM_BOT_TOKEN` и
+`OPENAI_API_KEY`. Ограничьте доступ через `ALLOWED_TELEGRAM_USER_IDS` и
+`ALLOWED_TELEGRAM_CHAT_IDS`. Роутер использует обычный OpenAI Responses API;
+модель по умолчанию — `gpt-4.1-mini`, переопределение — `LIBRARY_ROUTER_MODEL`.
 
-Обычный короткий вопрос без вложений направляется в GBrain `think`; отчёты,
-forwarded messages, media groups и сбор `/collect` → `/save` сохраняются.
-Для синтеза ответа задайте `ANTHROPIC_API_KEY` или укажите
-`LIBRARY_GBRAIN_THINK_MODEL` и ключ соответствующего chat-провайдера.
+Естественный текст, forwarded messages, фото, documents и media groups проходят
+через единый каталог скиллов. Неоднозначное намерение приводит к уточнению.
+`/collect` и `/save` остаются алиасами естественных просьб начать и завершить сбор.
+
+Ответ генерирует GBrain, а бот передаёт его текст без изменений. Для GBrain
+задайте `ANTHROPIC_API_KEY` либо `LIBRARY_GBRAIN_THINK_MODEL` и ключ выбранного
+chat-провайдера. Codex/MCP в Telegram-роутере не используются.
 
 ## MCP
 

@@ -3,6 +3,22 @@
 Рабочая реализация архитектурного плана находится в `src/`. Актуальная структура и
 архитектурные решения описаны в [`arch.md`](arch.md), команды установки, запуска,
 проверки REST, Telegram, MCP и GBrain — в [`DEVELOPMENT.md`](DEVELOPMENT.md).
+## Текущий Telegram-библиотекарь
+
+Все пользовательские действия оформлены как зарегистрированные прикладные скиллы
+в `src/controllers/utils/skills`. Естественный текст маршрутизируется отдельным
+обычным OpenAI Responses API-вызовом со Structured Outputs. Модель по умолчанию —
+`gpt-4.1-mini`, настройка — `LIBRARY_ROUTER_MODEL`.
+
+Роутер только выбирает скилл или задаёт уточняющий вопрос. Он не отвечает и не
+сохраняет данные. Вопросы выполняет GBrain через `ask_library`; текст ответа GBrain
+уходит в Telegram без дополнений и переформатирования. Отчёты, фото, albums и
+документы сохраняются через `save_material`. Составной материал собирается цепочкой
+`collect_material` → `append_collection` → `finish_collection`.
+
+Codex и MCP в маршрутизации не участвуют. MCP остаётся внешним интерфейсом для
+других сервисов.
+
 
 Ниже сохранён исходный подробный план продукта.
 
@@ -84,8 +100,9 @@ GBrain `think` является основным синтезатором отв
 - предложения связей и изменений research schema;
 - разрешения неоднозначного намерения пользователя.
 
-Используется тот же провайдер/модель, что и для GBrain, если это технически
-возможно. OCR не выполнять. Анализ изображений по умолчанию отключён.
+Для Telegram intent routing используется отдельный OpenAI API-вызов с моделью
+`gpt-4.1-mini` по умолчанию. GBrain `think` остаётся независимым ответчиком.
+OCR не выполнять. Анализ изображений по умолчанию отключён.
 
 ## 3. Архитектура
 
@@ -95,7 +112,7 @@ Telegram
     v
 Library Telegram Bot
     |
-    +--> deterministic intent router
+    +--> LLM skill router (OpenAI Responses API)
     |       |
     |       +--> ingestion pipeline
     |       +--> GBrain search
@@ -324,13 +341,16 @@ LIBRARY_SCHEMA_MUTATION_MODE=propose  # disabled | propose | auto
 /health
 ```
 
-Обычный текст:
+Обычный текст, вложения, Telegram-метаданные и контекст диалога получает LLM-роутер.
+Slash-команды являются только необязательными алиасами тех же скиллов:
 
-1. явные команды обрабатываются напрямую;
-2. forward, media и активная collection session всегда идут в ingestion;
-3. короткий явно сформулированный вопрос без вложений идёт в GBrain `think`;
-4. отчёт, длинный многострочный текст и явная просьба сохранить идут в ingestion;
-5. неоднозначный текст сохраняется, чтобы библиотекарь не потерял материал.
+1. вопрос вызывает `ask_library`, который возвращает неизменённый ответ GBrain;
+2. явный retrieval вызывает `search_library`;
+3. любой отчёт — пересланный или написанный напрямую — вызывает `save_material`;
+4. естественные просьбы начать/закончить сбор вызывают `collect_material` и
+   `finish_collection`;
+5. в активный сбор сообщения добавляет `append_collection`;
+6. неоднозначное намерение приводит к уточняющему вопросу без поиска и сохранения.
 
 ### 7.3. Ответ после сохранения
 
@@ -659,6 +679,9 @@ LIBRARY_GBRAIN_EMBEDDING_DIMENSIONS=
 LIBRARY_GBRAIN_THINK_MODEL=
 ANTHROPIC_API_KEY=
 OPENAI_API_KEY=
+LIBRARY_ROUTER_MODEL=gpt-4.1-mini
+LIBRARY_ROUTER_TIMEOUT_SECONDS=30
+LIBRARY_ROUTER_CONTEXT_TURNS=12
 ZEROENTROPY_API_KEY=
 VOYAGE_API_KEY=
 
@@ -676,6 +699,10 @@ LOG_LEVEL=INFO
 ```
 
 По умолчанию используется настоящий GBrain с keyword search без внешнего embedding provider.
+`OPENAI_API_KEY` обязателен для включённого Telegram-бота и используется его
+LLM-роутером. Это обычный OpenAI API, не Codex и не MCP. Настройки GBrain-модели
+и provider key задаются независимо.
+
 Для ответов на вопросы задайте ключ chat-провайдера; модель по умолчанию GBrain требует
 `ANTHROPIC_API_KEY`, либо задайте `LIBRARY_GBRAIN_THINK_MODEL` и ключ соответствующего
 провайдера. Для semantic search отключите `LIBRARY_GBRAIN_NO_EMBEDDING` и задайте модель, размерность и ключ выбранного GBrain provider. Не проксировать неизвестные переменные
@@ -777,9 +804,9 @@ PGLite также можно резервировать, но восстанов
 
 ### Этап 4. Librarian query/enrichment
 
-- [x] Реализовать консервативный intent router.
+- [x] Реализовать LLM-роутер и каталог прикладных скиллов.
 - [x] Подключить GBrain search и think.
-- [x] Добавить citations/source rendering.
+- [x] Добавить точный passthrough текста GBrain без собственного source rendering.
 - [x] Добавить related items.
 - [ ] Добавить dedup по URL/content similarity.
 - [x] Добавить schema proposal workflow.
@@ -817,7 +844,8 @@ PGLite также можно резервировать, но восстанов
 
 - config validation;
 - idempotency key and payload hash;
-- Telegram intent classification;
+- strict LLM router schema and clarification;
+- Telegram command-to-skill mapping;
 - media group aggregation;
 - Markdown/frontmatter generation;
 - slug normalization;
@@ -856,7 +884,7 @@ PGLite также можно резервировать, но восстанов
 - Telegram-forward с изображениями сохраняется без экспорта истории и OCR.
 - Идеи, публикации и отчёты получают разные page types.
 - Поиск работает по описанию, а не только по ID.
-- `/ask` формирует ответ с указанием страниц-источников.
+- `/ask` и естественный вопрос возвращают неизменённый текст ответа GBrain.
 - Внешний сервис сохраняет отчёт напрямую через API/MCP без Telegram.
 - Повторный MCP/Telegram запрос не создаёт дубликат.
 - Изображения сохраняются на volume с заданной длинной стороной.
