@@ -7,6 +7,7 @@ def test_router_uses_requested_default_model() -> None:
     settings = Settings()
 
     assert settings.library_router_model == "gpt-4.1-mini"
+    assert settings.library_gbrain_think_model == "openai:gpt-4.1-mini"
 
 
 def test_openai_key_is_required_only_when_telegram_is_enabled() -> None:

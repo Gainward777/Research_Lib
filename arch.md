@@ -657,14 +657,17 @@ LLM-роутер вместе с Telegram-метаданными и контек
 
 - обычный вопрос и `/ask` вызывают один `ask_library`;
 - `ask_library` передаёт GBrain исходный вопрос, а ответ GBrain отправляется без
-  дополнений, источников и переформатирования; допустимо только точное разбиение
-  по лимиту Telegram;
+  дополнений, источников, перевода и переформатирования; допустимо только точное
+  разбиение по лимиту Telegram;
+- русский язык ответа задаётся внутри GBrain его build-патчем, поэтому passthrough
+  не нарушается;
 - любой отчёт, пересланный или написанный боту напрямую, сохраняется только через
   `save_material`, включая текст, фотографии, albums и документы;
 - `collect_material` начинает накопление, `append_collection` добавляет очередное
   сообщение, `finish_collection` вызывает `save_material` один раз для всего набора;
 - естественные фразы начала и завершения collection равноправны slash-алиасам;
-- при неоднозначном намерении возвращается уточняющий вопрос без поиска и записи.
+- при неоднозначном намерении возвращается уточняющий вопрос на русском языке без
+  поиска и записи.
 
 Модель роутера по умолчанию — `gpt-4.1-mini`. Это отдельный обычный OpenAI API-вызов,
 не Codex и не MCP. MCP подключается к библиотеке только как внешний интерфейс.
@@ -778,10 +781,7 @@ LIBRARY_GBRAIN_TIMEOUT_SECONDS=120
 LIBRARY_GBRAIN_NO_EMBEDDING=true
 LIBRARY_GBRAIN_EMBEDDING_MODEL=
 LIBRARY_GBRAIN_EMBEDDING_DIMENSIONS=
-LIBRARY_GBRAIN_THINK_MODEL=
-ANTHROPIC_API_KEY=
-ZEROENTROPY_API_KEY=
-VOYAGE_API_KEY=
+LIBRARY_GBRAIN_THINK_MODEL=openai:gpt-4.1-mini
 
 LIBRARY_IMAGE_MAX_LONG_SIDE_PX=2048
 LIBRARY_IMAGE_FORMAT=webp
@@ -797,13 +797,13 @@ LOG_LEVEL=INFO
 ```
 
 `OPENAI_API_KEY` обязателен при включённом Telegram и используется LLM-роутером
-через Responses API. `LIBRARY_ROUTER_MODEL` по умолчанию равен `gpt-4.1-mini`.
-Этот вызов не запускает Codex и не использует MCP.
+через Responses API и GBrain `think`. `LIBRARY_ROUTER_MODEL` по умолчанию равен
+`gpt-4.1-mini`, а `LIBRARY_GBRAIN_THINK_MODEL` — `openai:gpt-4.1-mini`. Эти вызовы
+не запускают Codex и не используют MCP.
 
-Для ответов `ask_library` нужен отдельный chat-provider GBrain. По умолчанию
-GBrain использует Anthropic; для другого провайдера задаются
-`LIBRARY_GBRAIN_THINK_MODEL` и соответствующий provider key. Неизвестные переменные
-окружения не передаются GBrain subprocess.
+Единственный разрешённый LLM-провайдер — OpenAI. GBrain subprocess получает только
+`OPENAI_API_KEY`; ключи других провайдеров и неизвестные переменные окружения ему
+не передаются.
 
 ## 19. Безопасность
 
@@ -827,7 +827,10 @@ GBrain использует Anthropic; для другого провайдер�
 - `/readyz` проверяет writable volume, SQLite migrations и GBrain;
 - graceful shutdown завершает активную SQLite transaction;
 - во время shutdown не запускаются новые mutating GBrain jobs;
-- GBrain 0.45.12.0 собирается из commit `7fdcd8bd2ee0b3546b167da14cddd27eb2507212` и не обновляется без изменения pin в Dockerfile.
+- GBrain 0.45.12.0 собирается из commit
+  `7fdcd8bd2ee0b3546b167da14cddd27eb2507212`, затем получает локальный patch
+  `scripts/gbrain-russian-output.patch`; версия и patch не меняются без явного
+  изменения репозитория.
 
 Резервировать обязательно:
 

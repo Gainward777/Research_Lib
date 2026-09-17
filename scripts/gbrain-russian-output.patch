@@ -1,0 +1,13 @@
+diff --git a/src/core/think/prompt.ts b/src/core/think/prompt.ts
+--- a/src/core/think/prompt.ts
++++ b/src/core/think/prompt.ts
+@@ -47,6 +47,9 @@
+ <graph>...</graph>      Optional. Anchor entity's subgraph: nodes + edges relevant to the question.
+ 
+ Hard rules:
++- Write the complete "answer" and every "gaps" entry in Russian. Keep proper names,
++  code, URLs, technical identifiers, and citation slugs unchanged. Use Russian section
++  headings, including "Ответ" and "Противоречия" when those sections are present.
+ - Cite EVERY substantive claim. Use [slug#row] for take citations and [slug] for page citations.
+   Inline the citation immediately after the claim it supports. Never fabricate slugs/rows.
+ - If a take has weight < 0.5 or kind=hunch, mark it explicitly: "garry has a hunch (w=0.4) that..."

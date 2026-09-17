@@ -28,7 +28,7 @@ class OpenAIResponsesClient:
         schema: dict[str, Any],
     ) -> dict[str, Any]:
         if not self.api_key:
-            raise RuntimeError("OPENAI_API_KEY is required for the Telegram intent router")
+            raise RuntimeError("Для маршрутизатора Telegram требуется OPENAI_API_KEY")
 
         payload = {
             "model": self.model,
@@ -47,7 +47,7 @@ class OpenAIResponsesClient:
                 "format": {
                     "type": "json_schema",
                     "name": "library_router_decision",
-                    "description": "A single library skill invocation or a clarification request.",
+                    "description": "Вызов одного скилла библиотеки или запрос уточнения.",
                     "strict": True,
                     "schema": schema,
                 }
@@ -77,9 +77,9 @@ class OpenAIResponsesClient:
                 if not isinstance(content, dict):
                     continue
                 if content.get("type") == "refusal":
-                    raise RuntimeError("OpenAI router refused to classify the request")
+                    raise RuntimeError("Маршрутизатор OpenAI отказался классифицировать запрос")
                 if content.get("type") == "output_text":
                     value = json.loads(str(content.get("text", "")))
                     if isinstance(value, dict):
                         return value
-        raise RuntimeError("OpenAI router returned no structured decision")
+        raise RuntimeError("Маршрутизатор OpenAI не вернул структурированное решение")

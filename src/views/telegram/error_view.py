@@ -1,2 +1,2 @@
-def render_error(message: str) -> str:
-    return f"Не удалось выполнить запрос: {message}"
+def render_error(_message: str) -> str:
+    return "Не удалось выполнить запрос. Попробуйте ещё раз позже."

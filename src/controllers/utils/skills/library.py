@@ -38,7 +38,7 @@ async def save_material(arguments: SkillArguments, context: SkillContext) -> str
     if not content and not upload_ids:
         return "Нет материала для сохранения."
     item_type = arguments.material_type or classify_material(content)
-    title = (arguments.title or _first_nonempty_line(content, "Telegram media"))[:300]
+    title = (arguments.title or _first_nonempty_line(content, "Медиа из Telegram"))[:300]
     metadata: dict[str, object] = {
         "telegram_chat_id": context.telegram.chat_id,
         "telegram_message_ids": context.telegram.message_ids,
@@ -145,24 +145,29 @@ def build_library_skill_registry() -> SkillRegistry:
     registry.register(
         SkillDefinition(
             name="ask_library",
-            description="Answer a natural-language question using GBrain think.",
-            arguments={"query": "Question; the application uses original_text exactly."},
+            description="Ответить на вопрос на естественном языке через GBrain think.",
+            arguments={"query": "Вопрос; приложение передаст original_text без изменений."},
             handler=ask_library,
         )
     )
     registry.register(
         SkillDefinition(
             name="search_library",
-            description="Retrieve a list of matching stored materials without synthesized answer.",
-            arguments={"query": "Concise retrieval query."},
+            description="Найти подходящие сохранённые материалы без синтеза ответа.",
+            arguments={"query": "Краткий поисковый запрос."},
             handler=search_library,
         )
     )
     registry.register(
         SkillDefinition(
             name="save_material",
-            description="Persist one report, note, idea, publication, album, or document set.",
-            arguments={"title": "Optional title.", "material_type": "Optional library page type."},
+            description=(
+                "Сохранить один отчёт, заметку, идею, публикацию, альбом или набор документов."
+            ),
+            arguments={
+                "title": "Необязательный заголовок.",
+                "material_type": "Необязательный тип материала библиотеки.",
+            },
             handler=save_material,
             accepts_attachments=True,
         )
@@ -170,14 +175,14 @@ def build_library_skill_registry() -> SkillRegistry:
     registry.register(
         SkillDefinition(
             name="collect_material",
-            description="Start collecting future messages and attachments into one material.",
+            description="Начать сбор следующих сообщений и вложений в один материал.",
             handler=collect_material,
         )
     )
     registry.register(
         SkillDefinition(
             name="append_collection",
-            description="Append the current content to an already active collection.",
+            description="Добавить текущее сообщение в активный сбор материала.",
             handler=append_collection,
             accepts_attachments=True,
         )
@@ -206,8 +211,8 @@ def build_library_skill_registry() -> SkillRegistry:
     registry.register(
         SkillDefinition(
             name="finish_collection",
-            description="Finish the active collection and save all parts through save_material.",
-            arguments={"text": "Optional final text supplied by a slash alias."},
+            description="Завершить активный сбор и сохранить все части через save_material.",
+            arguments={"text": "Необязательный финальный текст из slash-команды."},
             handler=finish_collection,
             accepts_attachments=True,
         )
@@ -215,45 +220,45 @@ def build_library_skill_registry() -> SkillRegistry:
     registry.register(
         SkillDefinition(
             name="cancel_collection",
-            description="Cancel the active collection and discard its pending attachments.",
+            description="Отменить активный сбор и удалить его несохранённые вложения.",
             handler=cancel_collection,
         )
     )
     registry.register(
         SkillDefinition(
             name="get_library_item",
-            description="Open one stored item by stable id or slug.",
-            arguments={"item_ref": "Item id or slug."},
+            description="Открыть сохранённый материал по постоянному ID или slug.",
+            arguments={"item_ref": "ID или slug материала."},
             handler=get_library_item,
         )
     )
     registry.register(
         SkillDefinition(
             name="get_related_items",
-            description="List relations of one stored item.",
-            arguments={"item_ref": "Item id or slug."},
+            description="Показать связи сохранённого материала.",
+            arguments={"item_ref": "ID или slug материала."},
             handler=get_related_items,
         )
     )
     registry.register(
         SkillDefinition(
             name="list_recent_items",
-            description="List the ten most recently stored items, optionally filtered by type.",
-            arguments={"requested_type": "Optional library item type."},
+            description="Показать десять последних материалов с необязательным фильтром по типу.",
+            arguments={"requested_type": "Необязательный тип материала."},
             handler=list_recent_items,
         )
     )
     registry.register(
         SkillDefinition(
             name="list_schema_proposals",
-            description="List pending research schema proposals.",
+            description="Показать ожидающие предложения по изменению исследовательской схемы.",
             handler=list_schema_proposals,
         )
     )
     registry.register(
         SkillDefinition(
             name="check_library_health",
-            description="Check whether the GBrain-backed library is ready.",
+            description="Проверить готовность библиотеки на базе GBrain.",
             handler=check_library_health,
         )
     )

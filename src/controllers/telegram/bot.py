@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
@@ -27,6 +28,7 @@ from views.telegram.error_view import render_error
 from views.telegram.message_view import split_message
 
 Handler = Callable[[Message, ApplicationContainer], Awaitable[str]]
+logger = logging.getLogger(__name__)
 
 
 class TelegramBotRunner:
@@ -49,6 +51,7 @@ class TelegramBotRunner:
         try:
             await self._answer(message, await handler(message, self.container))
         except Exception as exc:
+            logger.exception("Telegram handler failed")
             await message.answer(render_error(str(exc)))
 
     def _register_handlers(self) -> None:
@@ -107,6 +110,7 @@ class TelegramBotRunner:
                 await route_natural_messages(messages, self.container),
             )
         except Exception as exc:
+            logger.exception("Telegram media group handler failed")
             await response_message.answer(render_error(str(exc)))
 
     async def start(self) -> None:

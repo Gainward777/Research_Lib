@@ -8,11 +8,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/gbrain
+COPY scripts/gbrain-russian-output.patch /tmp/gbrain-russian-output.patch
 RUN git init \
     && git remote add origin https://github.com/garrytan/gbrain.git \
     && git fetch --depth=1 origin "${GBRAIN_COMMIT}" \
     && git checkout --detach FETCH_HEAD \
-    && grep -q "\"version\": \"${GBRAIN_VERSION}\"" package.json
+    && grep -q "\"version\": \"${GBRAIN_VERSION}\"" package.json \
+    && git apply --check /tmp/gbrain-russian-output.patch \
+    && git apply /tmp/gbrain-russian-output.patch
 RUN bun install --frozen-lockfile \
     && bun run build \
     && ./bin/gbrain --version

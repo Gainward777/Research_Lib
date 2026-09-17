@@ -1,10 +1,16 @@
 import json
+import re
 from typing import Any
 
 from controllers.utils.infrastructure.llm.openai_responses import OpenAIResponsesClient
 from controllers.utils.skills.models import RouterDecision, RouterInput
 from controllers.utils.skills.registry import SkillRegistry
 from models.enums import LibraryItemType
+
+DEFAULT_CLARIFICATION_QUESTION = (
+    "Уточните, пожалуйста: вы хотите сохранить материал, найти материалы "
+    "или задать вопрос библиотеке?"
+)
 
 
 class NaturalLanguageRouter:
@@ -23,25 +29,32 @@ class NaturalLanguageRouter:
         decision = RouterDecision.model_validate(raw)
         if decision.kind == "invoke":
             self.registry.get(str(decision.skill_name))
+        elif not re.search(r"[А-Яа-яЁё]", str(decision.clarification_question)):
+            decision = decision.model_copy(
+                update={"clarification_question": DEFAULT_CLARIFICATION_QUESTION}
+            )
         return decision
 
     def _system_prompt(self) -> str:
         catalog = json.dumps(self.registry.catalog(), ensure_ascii=False, indent=2)
         return (
-            "You are the intent router for a Telegram research librarian. "
-            "Return only the requested structured decision. Never answer the user, never search, "
-            "and never save anything yourself. Choose exactly one registered skill or request a "
-            "clarification for ambiguous intent. A normal knowledge question must use "
-            "ask_library. An explicit request to find/list matching stored materials uses "
-            "search_library. Any clearly stated report, including one written directly to the bot "
-            "or forwarded from another chat, must use save_material. Reports may include text, "
-            "photos, albums, and documents. Never silently save or ask on ambiguous input. "
-            "collect_material starts a multi-message collection; while collection_active is true, "
-            "content normally uses append_collection, an explicit finish request uses "
-            "finish_collection, and an explicit cancellation uses cancel_collection. Preserve the "
-            "meaning of the original text; the application will pass the exact original question "
-            "to GBrain and the exact original report to storage. Use null for unused arguments. "
-            f"Registered skills:\n{catalog}"
+            "Ты — маршрутизатор намерений Telegram-бота-библиотекаря. "
+            "Возвращай только запрошенное структурированное решение. Сам не отвечай "
+            "пользователю, не выполняй поиск и ничего не сохраняй. Выбери ровно один "
+            "зарегистрированный скилл, а при неоднозначном намерении запроси уточнение. "
+            "Любой уточняющий вопрос формулируй только на русском языке. Обычный вопрос "
+            "о знаниях направляй в ask_library. Явную просьбу найти или перечислить "
+            "подходящие сохранённые материалы направляй в search_library. Любой явно "
+            "сформулированный отчёт, написанный боту или пересланный из другого чата, "
+            "направляй в save_material. Отчёт может содержать текст, фотографии, альбомы "
+            "и документы. При неоднозначности не сохраняй материал и не задавай вопрос "
+            "библиотеке молча. collect_material начинает сбор нескольких сообщений; когда "
+            "collection_active=true, очередной материал обычно направляется в "
+            "append_collection, явное завершение — в finish_collection, отмена — в "
+            "cancel_collection. Сохраняй смысл исходного текста: приложение передаст "
+            "GBrain точный исходный вопрос, а в хранилище — точный исходный отчёт. "
+            "Для неиспользуемых аргументов указывай null. "
+            f"Зарегистрированные скиллы:\n{catalog}"
         )
 
     def _decision_schema(self) -> dict[str, Any]:

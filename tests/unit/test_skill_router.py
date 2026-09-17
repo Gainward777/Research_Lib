@@ -11,7 +11,7 @@ from controllers.utils.skills.models import (
     RouterInput,
     TelegramMetadata,
 )
-from controllers.utils.skills.router import NaturalLanguageRouter
+from controllers.utils.skills.router import DEFAULT_CLARIFICATION_QUESTION, NaturalLanguageRouter
 
 
 def decision_payload(*, skill_name: str = "ask_library") -> dict[str, object]:
@@ -84,6 +84,10 @@ async def test_router_sends_complete_context_and_uses_strict_schema() -> None:
     assert decision.skill_name == "ask_library"
     assert captured["model"] == "gpt-4.1-mini"
     assert captured["store"] is False
+    system_prompt = captured["input"][0]["content"][0]["text"]
+    assert "Любой уточняющий вопрос формулируй только на русском языке" in system_prompt
+    assert "Ответить на вопрос на естественном языке" in system_prompt
+    assert "You are the intent router" not in system_prompt
     response_format = captured["text"]["format"]
     assert response_format["strict"] is True
     assert set(response_format["schema"]["properties"]["skill_name"]["anyOf"][0]["enum"]) == set(
@@ -134,3 +138,57 @@ async def test_router_rejects_unregistered_skill() -> None:
 
     with pytest.raises(ValueError, match="Unknown library skill"):
         await router.route(router_input)
+
+
+@pytest.mark.asyncio
+async def test_router_replaces_english_clarification_with_russian_fallback() -> None:
+    payload = decision_payload()
+    payload.update(
+        {
+            "kind": "clarify",
+            "skill_name": None,
+            "clarification_question": "Do you want to save this or ask a question?",
+        }
+    )
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(payload),
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+    registry = build_library_skill_registry()
+    router = NaturalLanguageRouter(
+        OpenAIResponsesClient(
+            "test-key",
+            model="gpt-4.1-mini",
+            transport=httpx.MockTransport(respond),
+        ),
+        registry,
+    )
+
+    decision = await router.route(
+        RouterInput(
+            original_text="Неоднозначное сообщение",
+            telegram=TelegramMetadata(
+                chat_id=1,
+                chat_type="private",
+                message_ids=[2],
+            ),
+        )
+    )
+
+    assert decision.kind == "clarify"
+    assert decision.clarification_question == DEFAULT_CLARIFICATION_QUESTION

@@ -1,5 +1,7 @@
 # Research Library
 
+Пользовательская документация: [`docs/index.html`](docs/index.html).
+
 Рабочая реализация архитектурного плана находится в `src/`. Актуальная структура и
 архитектурные решения описаны в [`arch.md`](arch.md), команды установки, запуска,
 проверки REST, Telegram, MCP и GBrain — в [`DEVELOPMENT.md`](DEVELOPMENT.md).
@@ -11,10 +13,12 @@
 `gpt-4.1-mini`, настройка — `LIBRARY_ROUTER_MODEL`.
 
 Роутер только выбирает скилл или задаёт уточняющий вопрос. Он не отвечает и не
-сохраняет данные. Вопросы выполняет GBrain через `ask_library`; текст ответа GBrain
-уходит в Telegram без дополнений и переформатирования. Отчёты, фото, albums и
-документы сохраняются через `save_material`. Составной материал собирается цепочкой
-`collect_material` → `append_collection` → `finish_collection`.
+сохраняет данные; уточнения всегда формулируются по-русски. Вопросы выполняет GBrain
+через `ask_library`. Его system prompt локализован build-патчем, поэтому синтез
+формируется на русском, а полученный текст уходит в Telegram без дополнений и
+переформатирования. Отчёты, фото, albums и документы сохраняются через
+`save_material`. Составной материал собирается цепочкой `collect_material` →
+`append_collection` → `finish_collection`.
 
 Codex и MCP в маршрутизации не участвуют. MCP остаётся внешним интерфейсом для
 других сервисов.
@@ -101,7 +105,8 @@ GBrain `think` является основным синтезатором отв
 - разрешения неоднозначного намерения пользователя.
 
 Для Telegram intent routing используется отдельный OpenAI API-вызов с моделью
-`gpt-4.1-mini` по умолчанию. GBrain `think` остаётся независимым ответчиком.
+`gpt-4.1-mini` по умолчанию. GBrain `think` использует OpenAI-модель
+`openai:gpt-4.1-mini` и формирует ответы на русском языке.
 OCR не выполнять. Анализ изображений по умолчанию отключён.
 
 ## 3. Архитектура
@@ -645,6 +650,8 @@ research-library/
 
 GBrain `0.45.12.0` (commit `7fdcd8bd2ee0b3546b167da14cddd27eb2507212`)
 компилируется в Dockerfile и запускается CLI-подпроцессами внутри того же контейнера.
+Перед компиляцией применяется репозиторный patch
+`scripts/gbrain-russian-output.patch`, задающий русский язык ответа `think`.
 При старте приложение автоматически создаёт PGLite в `LIBRARY_GBRAIN_HOME` или
 применяет миграции к существующей базе, затем выполняет `gbrain doctor --json`.
 Без бинарника нужной версии или исправного GBrain приложение не стартует.
@@ -676,14 +683,11 @@ LIBRARY_GBRAIN_TIMEOUT_SECONDS=120
 LIBRARY_GBRAIN_NO_EMBEDDING=true
 LIBRARY_GBRAIN_EMBEDDING_MODEL=
 LIBRARY_GBRAIN_EMBEDDING_DIMENSIONS=
-LIBRARY_GBRAIN_THINK_MODEL=
-ANTHROPIC_API_KEY=
+LIBRARY_GBRAIN_THINK_MODEL=openai:gpt-4.1-mini
 OPENAI_API_KEY=
 LIBRARY_ROUTER_MODEL=gpt-4.1-mini
 LIBRARY_ROUTER_TIMEOUT_SECONDS=30
 LIBRARY_ROUTER_CONTEXT_TURNS=12
-ZEROENTROPY_API_KEY=
-VOYAGE_API_KEY=
 
 LIBRARY_IMAGE_MAX_LONG_SIDE_PX=2048
 LIBRARY_IMAGE_FORMAT=webp
@@ -699,14 +703,14 @@ LOG_LEVEL=INFO
 ```
 
 По умолчанию используется настоящий GBrain с keyword search без внешнего embedding provider.
-`OPENAI_API_KEY` обязателен для включённого Telegram-бота и используется его
-LLM-роутером. Это обычный OpenAI API, не Codex и не MCP. Настройки GBrain-модели
-и provider key задаются независимо.
+`OPENAI_API_KEY` обязателен для включённого Telegram-бота. Один ключ используется
+LLM-роутером и GBrain `think`; это обычный OpenAI API, не Codex и не MCP.
+Единственный разрешённый LLM-провайдер — OpenAI, модель GBrain по умолчанию —
+`openai:gpt-4.1-mini`.
 
-Для ответов на вопросы задайте ключ chat-провайдера; модель по умолчанию GBrain требует
-`ANTHROPIC_API_KEY`, либо задайте `LIBRARY_GBRAIN_THINK_MODEL` и ключ соответствующего
-провайдера. Для semantic search отключите `LIBRARY_GBRAIN_NO_EMBEDDING` и задайте модель, размерность и ключ выбранного GBrain provider. Не проксировать неизвестные переменные
-пользовательского окружения в GBrain subprocess.
+Для semantic search отключите `LIBRARY_GBRAIN_NO_EMBEDDING` и задайте OpenAI
+embedding-модель и её размерность. Пользовательские переменные окружения, кроме
+`OPENAI_API_KEY`, в GBrain subprocess не передаются.
 
 ## 15. Railway deployment
 

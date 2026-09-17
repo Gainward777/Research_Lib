@@ -20,8 +20,9 @@ docker run --rm -p 8000:8000 -v research-library-data:/data --env-file .env rese
 API будет доступен на `http://127.0.0.1:8000`, OpenAPI — на `/docs`. При запуске
 на хосте `LIBRARY_GBRAIN_COMMAND` должен указывать на pinned GBrain CLI. Приложение
 само инициализирует PGLite в `LIBRARY_GBRAIN_HOME`; Markdown-fallback отсутствует.
-Subprocess получает системный allowlist, `GBRAIN_HOME` и только ключи официальных
-GBrain provider, но не Telegram/API/MCP tokens.
+Subprocess получает системный allowlist, `GBRAIN_HOME` и только
+`OPENAI_API_KEY`, но не Telegram/API/MCP tokens. Docker-образ применяет к pinned
+GBrain репозиторный patch, который требует русский язык от `think`.
 
 ## Проверка
 ```powershell
@@ -58,14 +59,16 @@ Telegram polling запускается вместе с API, если задан
 `OPENAI_API_KEY`. Ограничьте доступ через `ALLOWED_TELEGRAM_USER_IDS` и
 `ALLOWED_TELEGRAM_CHAT_IDS`. Роутер использует обычный OpenAI Responses API;
 модель по умолчанию — `gpt-4.1-mini`, переопределение — `LIBRARY_ROUTER_MODEL`.
+Все уточнения роутера и служебные сообщения формируются по-русски.
 
 Естественный текст, forwarded messages, фото, documents и media groups проходят
 через единый каталог скиллов. Неоднозначное намерение приводит к уточнению.
 `/collect` и `/save` остаются алиасами естественных просьб начать и завершить сбор.
 
-Ответ генерирует GBrain, а бот передаёт его текст без изменений. Для GBrain
-задайте `ANTHROPIC_API_KEY` либо `LIBRARY_GBRAIN_THINK_MODEL` и ключ выбранного
-chat-провайдера. Codex/MCP в Telegram-роутере не используются.
+Ответ на русском генерирует GBrain с моделью
+`LIBRARY_GBRAIN_THINK_MODEL=openai:gpt-4.1-mini`, а бот передаёт его текст без
+изменений. Один `OPENAI_API_KEY` используется GBrain и роутером. Codex/MCP в
+Telegram-роутере не используются.
 
 ## MCP
 

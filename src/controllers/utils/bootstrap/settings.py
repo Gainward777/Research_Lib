@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     library_gbrain_no_embedding: bool = True
     library_gbrain_embedding_model: str = ""
     library_gbrain_embedding_dimensions: int | None = None
-    library_gbrain_think_model: str = ""
+    library_gbrain_think_model: str = "openai:gpt-4.1-mini"
 
     library_image_max_long_side_px: int = 2048
     library_image_format: str = "webp"

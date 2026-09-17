@@ -31,9 +31,6 @@ class GBrainAdapter:
         "APPDATA",
         "LOCALAPPDATA",
         "OPENAI_API_KEY",
-        "ZEROENTROPY_API_KEY",
-        "VOYAGE_API_KEY",
-        "ANTHROPIC_API_KEY",
     )
     READY_STATUSES = {"ok", "healthy", "ready", "pass", "warn", "warning", "degraded"}
     FAILED_CHECK_STATUSES = {"error", "fail", "failed", "unhealthy"}

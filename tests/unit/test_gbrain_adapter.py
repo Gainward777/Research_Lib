@@ -39,13 +39,10 @@ def test_gbrain_result_normalization() -> None:
 
 
 def test_gbrain_environment_allowlist_is_explicit() -> None:
-    provider_keys = {
-        "OPENAI_API_KEY",
-        "ZEROENTROPY_API_KEY",
-        "VOYAGE_API_KEY",
-        "ANTHROPIC_API_KEY",
-    }
-    assert provider_keys.issubset(GBrainAdapter.SAFE_ENVIRONMENT_NAMES)
+    assert "OPENAI_API_KEY" in GBrainAdapter.SAFE_ENVIRONMENT_NAMES
+    assert "ANTHROPIC_API_KEY" not in GBrainAdapter.SAFE_ENVIRONMENT_NAMES
+    assert "ZEROENTROPY_API_KEY" not in GBrainAdapter.SAFE_ENVIRONMENT_NAMES
+    assert "VOYAGE_API_KEY" not in GBrainAdapter.SAFE_ENVIRONMENT_NAMES
     assert "LIBRARY_API_TOKEN" not in GBrainAdapter.SAFE_ENVIRONMENT_NAMES
     assert "MCP_AUTH_TOKEN" not in GBrainAdapter.SAFE_ENVIRONMENT_NAMES
     assert "TELEGRAM_BOT_TOKEN" not in GBrainAdapter.SAFE_ENVIRONMENT_NAMES
@@ -169,16 +166,21 @@ async def test_think_returns_synthesized_answer_with_library_sources(tmp_path: P
         summary="Relevant material",
     )
     repository = SimpleNamespace(get=AsyncMock(return_value=(item, "ideas/example")))
-    adapter = GBrainAdapter(repository, home=tmp_path, think_model="anthropic:test-model")
+    adapter = GBrainAdapter(repository, home=tmp_path, think_model="openai:gpt-4.1-mini")
     adapter._run_call = AsyncMock(
         return_value={
-            "answer": "  Synthesized answer.\nSecond line.  ",
+            "answer": "  Ответ GBrain.\nВторая строка.  ",
             "synthesisOk": True,
             "citations": [{"page_slug": "ideas/example", "row_num": None}],
         }
     )
+    question = "Что известно?"
 
-    result = await adapter.think(SearchCommand(query="What is known?"))
+    result = await adapter.think(SearchCommand(query=question))
 
-    assert result.answer == "  Synthesized answer.\nSecond line.  "
+    assert result.answer == "  Ответ GBrain.\nВторая строка.  "
     assert [source.item_id for source in result.sources] == [item.id]
+    assert adapter._run_call.await_args.args == (
+        "think",
+        {"question": question, "model": "openai:gpt-4.1-mini"},
+    )
