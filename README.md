@@ -484,6 +484,7 @@ Response:
 ```json
 {
   "query": "LoRA SDXL overfitting around 500 steps",
+  "sections": [{"domain": "research", "key": "main"}],
   "types": ["experiment-report", "idea", "publication"],
   "tags": [],
   "limit": 10,
@@ -497,6 +498,7 @@ GBrain think.
 ### 9.4. Идемпотентность
 
 - все mutating service-to-service запросы требуют `Idempotency-Key`;
+- idempotency key изолирован внутри section и может повторяться в другом section;
 - Telegram использует `telegram:<chat_id>:<message_id>`;
 - media group использует `telegram-group:<chat_id>:<media_group_id>`;
 - AutoResearch использует
@@ -506,8 +508,10 @@ GBrain think.
 
 ## 10. MCP facade
 
-MCP endpoint: `POST /mcp` по протоколу Streamable HTTP. При заданном
-`MCP_AUTH_TOKEN` клиент передаёт `Authorization: Bearer <token>`.
+MCP endpoint: `POST /mcp` по протоколу Streamable HTTP. Клиент передаёт
+индивидуальный project-scoped token: `Authorization: Bearer rl_<prefix>_<secret>`.
+`MCP_AUTH_TOKEN` поддерживается только временным compatibility adapter с явным
+`LIBRARY_LEGACY_MCP_GRANTS`.
 
 Минимальный внешний набор:
 
@@ -515,14 +519,26 @@ MCP endpoint: `POST /mcp` по протоколу Streamable HTTP. При зад
 library_search                  read-only
 library_get                     read-only
 library_get_related             read-only
+library_get_context             read-only
+library_publish_context         write
 library_save_experiment_report  write
 library_save_idea               write
 library_save_publication        write
 ```
 
 Административные schema mutations, удаление страниц и внутренний GBrain наружу
-не раскрываются. Клиентские skills, prompts и fallback-скрипты не входят в
-репозиторий библиотеки: если они нужны, ими владеет репозиторий внешнего сервиса.
+не раскрываются. Канонические переносимые Memento-скиллы находятся в
+`agent-skills/`; клиентские среды устанавливают или адаптируют их у себя и
+подключаются к библиотеке как внешние MCP-клиенты. Агентный runtime внутри
+Research Library не запускается.
+
+План и контракт общей памяти разработки описаны в
+[`docs/memento_adding.md`](docs/memento_adding.md).
+Эксплуатация метрик, JSON-логов и Grafana описана в
+[`docs/observability.md`](docs/observability.md).
+Разделы, выдача, ротация и отзыв токенов описаны в
+[`docs/access-control.md`](docs/access-control.md).
+
 ## 11. SQLite operational schema
 
 ```text
@@ -664,6 +680,7 @@ Markdown-поиска в production нет. Все обращения к PGLite 
 
 ```text
 TELEGRAM_BOT_TOKEN=
+LIBRARY_TELEGRAM_ACCESS_TOKEN=
 ALLOWED_TELEGRAM_USER_IDS=
 ALLOWED_TELEGRAM_CHAT_IDS=
 
@@ -673,8 +690,18 @@ LIBRARY_ATTACHMENTS_ROOT=/data/library/brain/attachments
 LIBRARY_SQLITE_PATH=/data/library/library.sqlite3
 
 LIBRARY_PUBLIC_URL=
+
+LIBRARY_AUTH_ENABLED=true
+LIBRARY_TOKEN_PEPPER=
+LIBRARY_PUBLIC_SECTIONS_ENABLED=false
+LIBRARY_AUTH_FAIL_CLOSED=true
+LIBRARY_DEFAULT_RESEARCH_SECTION=research/main
+
+# Только для временной миграции старых клиентов
 LIBRARY_API_TOKEN=
 MCP_AUTH_TOKEN=
+LIBRARY_LEGACY_API_GRANTS=
+LIBRARY_LEGACY_MCP_GRANTS=
 
 LIBRARY_GBRAIN_COMMAND=gbrain
 LIBRARY_GBRAIN_HOME=/data/library/gbrain
@@ -739,19 +766,21 @@ PGLite также можно резервировать, но восстанов
 
 ### 15.3. Наблюдаемость
 
-Метрики/логи:
+Реализованы:
 
-- ingest received/completed/failed;
-- duplicate receipts;
-- GBrain search/think latency;
-- LLM calls and token usage;
-- pending index jobs;
-- attachment bytes;
-- PGLite lock contention;
-- schema proposals;
-- Telegram delivery failures.
+- Memento search/publish outcomes, latency, hits и фиксированные blocks;
+- GBrain search/put/think/health outcomes и latency;
+- MCP tool outcomes, latency и auth failures;
+- pending-index gauges и retry outcomes;
+- JSON stdout с `request_id` и безопасным `principal_id`;
+- OTLP/HTTPS export в Grafana Cloud и закрытый self-hosted `/metrics`;
+- versioned dashboard и alert rules в `deploy/grafana/`.
 
-Не логировать bot/API tokens и содержимое приватных материалов на INFO level.
+Query, content, MCP payload, токены и document IDs не попадают в metric labels.
+Projects допускаются только из `METRICS_ALLOWED_PROJECTS`; остальные становятся
+`_unknown`. Полная настройка: [`docs/observability.md`](docs/observability.md).
+Разделы, выдача, ротация и отзыв токенов описаны в
+[`docs/access-control.md`](docs/access-control.md).
 
 ## 16. Этапы разработки
 
@@ -788,7 +817,7 @@ PGLite также можно резервировать, но восстанов
 - [ ] Реализовать uploads.
 - [ ] Реализовать items, experiment reports, ideas и publications.
 - [ ] Реализовать search/ask.
-- [ ] Реализовать bearer service tokens.
+- [x] Реализовать project-scoped bearer tokens с grants и отзывом.
 - [ ] Реализовать retryable jobs и status endpoint.
 - [ ] Опубликовать OpenAPI schema.
 

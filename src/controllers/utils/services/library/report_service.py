@@ -1,4 +1,5 @@
 from controllers.utils.services.library.item_service import ItemService
+from models.access import SectionRef
 from models.commands import CreateItemCommand
 from models.enums import LibraryItemType, SourceKind
 from models.experiment_report import ExperimentReport
@@ -15,6 +16,7 @@ class ReportService:
         *,
         attachment_upload_ids: list[str],
         idempotency_key: str,
+        section: SectionRef | None = None,
     ) -> SaveResult:
         content_parts = []
         if report.hypothesis:
@@ -28,6 +30,7 @@ class ReportService:
                 "## Ограничения\n\n" + "\n".join(f"- {item}" for item in report.limitations)
             )
         command = CreateItemCommand(
+            section=section,
             type=LibraryItemType.EXPERIMENT_REPORT,
             title=report.title,
             content="\n\n".join(content_parts),

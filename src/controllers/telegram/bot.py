@@ -24,6 +24,7 @@ from controllers.telegram.media_group_controller import MediaGroupCollector
 from controllers.telegram.message_controller import handle_message as route_message
 from controllers.telegram.router import is_allowed
 from controllers.utils.bootstrap.dependencies import ApplicationContainer
+from controllers.utils.services.access.context import bind_authorization
 from views.telegram.error_view import render_error
 from views.telegram.message_view import split_message
 
@@ -39,6 +40,7 @@ class TelegramBotRunner:
         self.task: asyncio.Task[None] | None = None
         self.media_groups = MediaGroupCollector()
         self.media_tasks: set[asyncio.Task[None]] = set()
+        self.authorization = container.authorization.anonymous_context()
         self._register_handlers()
 
     async def _answer(self, message: Message, response: str) -> None:
@@ -49,7 +51,9 @@ class TelegramBotRunner:
         if not is_allowed(message, self.container.settings):
             return
         try:
-            await self._answer(message, await handler(message, self.container))
+            with bind_authorization(self.authorization):
+                response = await handler(message, self.container)
+            await self._answer(message, response)
         except Exception as exc:
             logger.exception("Telegram handler failed")
             await message.answer(render_error(str(exc)))
@@ -105,15 +109,29 @@ class TelegramBotRunner:
         if not messages:
             return
         try:
-            await self._answer(
-                response_message,
-                await route_natural_messages(messages, self.container),
-            )
+            with bind_authorization(self.authorization):
+                response = await route_natural_messages(messages, self.container)
+            await self._answer(response_message, response)
         except Exception as exc:
             logger.exception("Telegram media group handler failed")
             await response_message.answer(render_error(str(exc)))
 
     async def start(self) -> None:
+        token = self.container.settings.library_telegram_access_token.get_secret_value()
+        self.authorization = await self.container.authorization.authenticate(
+            token or None, legacy_surface="api"
+        )
+        self.container.authorization.require_valid_token(self.authorization)
+        if (
+            self.container.settings.library_auth_enabled
+            and not self.authorization.authenticated
+        ):
+            raise ValueError("Telegram access token is not authenticated")
+        self.container.observability.recorder.record_auth(
+            surface="telegram",
+            outcome="success" if self.authorization.authenticated else "anonymous",
+            legacy=self.authorization.legacy,
+        )
         self.task = asyncio.create_task(self.dispatcher.start_polling(self.bot))
 
     async def stop(self) -> None:

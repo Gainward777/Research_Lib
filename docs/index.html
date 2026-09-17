@@ -120,9 +120,12 @@
         <a href="#overview">Как это работает</a>
         <a href="#railway">Развёртывание Railway</a>
         <a href="#variables">Переменные окружения</a>
+        <a href="#access">Разделы и токены</a>
         <a href="#telegram">Telegram-бот</a>
         <a href="#api">REST API</a>
         <a href="#mcp">Внешний MCP</a>
+        <a href="#memento">Память агентов</a>
+        <a href="#observability">Наблюдаемость</a>
         <a href="#data">Данные и резервирование</a>
         <a href="#diagnostics">Проверка и диагностика</a>
         <a href="#local">Локальный запуск</a>
@@ -173,8 +176,10 @@ OPENAI_API_KEY=sk-...
 ALLOWED_TELEGRAM_USER_IDS=123456789
 
 LIBRARY_DATA_ROOT=/data/library
-LIBRARY_API_TOKEN=сгенерируйте-длинный-случайный-секрет
-MCP_AUTH_TOKEN=сгенерируйте-другой-длинный-секрет
+LIBRARY_AUTH_ENABLED=true
+LIBRARY_TOKEN_PEPPER=сгенерируйте-длинный-случайный-секрет
+LIBRARY_PUBLIC_SECTIONS_ENABLED=false
+LIBRARY_AUTH_FAIL_CLOSED=true
 
 LIBRARY_ROUTER_MODEL=gpt-4.1-mini
 LIBRARY_GBRAIN_THINK_MODEL=openai:gpt-4.1-mini
@@ -184,16 +189,20 @@ LOG_LEVEL=INFO</code></pre>
 
       <section id="variables">
         <h2>Переменные окружения</h2>
-        <p><span class="req">Обязательно</span> означает обязательно для указанного сценария. Пустой allowlist разрешает доступ всем пользователям, а пустые API/MCP-токены отключают соответствующую авторизацию — для production так делать не следует.</p>
+        <p><span class="req">Обязательно</span> означает обязательно для указанного сценария. Пустой Telegram allowlist разрешает всех пользователей. Production-доступ к библиотеке включается через project-scoped tokens; старые API/MCP-токены нужны только на период миграции.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Переменная</th><th>Статус / значение</th><th>Назначение</th></tr></thead>
           <tbody>
             <tr><td><code>TELEGRAM_BOT_TOKEN</code></td><td class="req">Обязательно для бота</td><td>Токен от BotFather. Если пусто, Telegram polling не запускается.</td></tr>
+            <tr><td><code>LIBRARY_TELEGRAM_ACCESS_TOKEN</code></td><td class="req">При включённом auth</td><td>Индивидуальный subject token встроенного бота с grants нужного research section.</td></tr>
             <tr><td><code>OPENAI_API_KEY</code></td><td class="req">Обязательно для бота</td><td>Обычный ключ OpenAI API для LLM-роутера и GBrain <code>think</code>.</td></tr>
             <tr><td><code>ALLOWED_TELEGRAM_USER_IDS</code></td><td>CSV числовых ID</td><td>Разрешённые пользователи, например <code>123,456</code>. Пусто — разрешены все.</td></tr>
             <tr><td><code>ALLOWED_TELEGRAM_CHAT_IDS</code></td><td>CSV числовых ID</td><td>Дополнительный allowlist чатов. Пусто — ограничение по чатам не применяется.</td></tr>
-            <tr><td><code>LIBRARY_API_TOKEN</code></td><td class="req">Обязательно в production</td><td>Bearer-токен REST API. Пусто — API публичен.</td></tr>
-            <tr><td><code>MCP_AUTH_TOKEN</code></td><td class="req">Обязательно в production</td><td>Отдельный Bearer-токен endpoint <code>/mcp</code>. Не совпадает с API-токеном.</td></tr>
+            <tr><td><code>LIBRARY_AUTH_ENABLED</code></td><td class="req"><code>true</code> в production</td><td>Включает индивидуальные токены и section grants.</td></tr>
+            <tr><td><code>LIBRARY_TOKEN_PEPPER</code></td><td class="req">Обязательно при auth</td><td>Secret для HMAC токенов; смена требует перевыдачи всех токенов.</td></tr>
+            <tr><td><code>LIBRARY_PUBLIC_SECTIONS_ENABLED</code></td><td><code>false</code></td><td>Глобальный выключатель анонимного чтения public sections.</td></tr>
+            <tr><td><code>LIBRARY_AUTH_FAIL_CLOSED</code></td><td><code>true</code></td><td>Production-настройка безопасного отказа.</td></tr>
+            <tr><td><code>LIBRARY_API_TOKEN</code>, <code>MCP_AUTH_TOKEN</code></td><td>Временно</td><td>Compatibility tokens; права задаются только через <code>LIBRARY_LEGACY_API_GRANTS</code> и <code>LIBRARY_LEGACY_MCP_GRANTS</code>.</td></tr>
             <tr><td><code>LIBRARY_DATA_ROOT</code></td><td><code>/data/library</code></td><td>Корень постоянных данных.</td></tr>
             <tr><td><code>LIBRARY_BRAIN_ROOT</code></td><td><code>/data/library/brain</code></td><td>Markdown-страницы библиотеки.</td></tr>
             <tr><td><code>LIBRARY_ATTACHMENTS_ROOT</code></td><td><code>/data/library/brain/attachments</code></td><td>Фотографии и документы.</td></tr>
@@ -214,10 +223,30 @@ LOG_LEVEL=INFO</code></pre>
             <tr><td><code>LIBRARY_KEEP_ORIGINALS</code></td><td><code>false</code></td><td>Сохранять ли оригиналы изображений рядом с оптимизированными версиями.</td></tr>
             <tr><td><code>LIBRARY_SCHEMA_MUTATION_MODE</code></td><td><code>propose</code></td><td>Изменения схемы создаются как предложения, а не применяются автоматически.</td></tr>
             <tr><td><code>LOG_LEVEL</code></td><td><code>INFO</code></td><td>Уровень журналирования.</td></tr>
+            <tr><td><code>METRICS_ENABLED</code></td><td><code>false</code></td><td>Включает OTLP-export метрик в Grafana Cloud.</td></tr>
+            <tr><td><code>METRICS_ENDPOINT_ENABLED</code></td><td><code>false</code></td><td>Включает локальный Prometheus endpoint <code>/metrics</code>.</td></tr>
+            <tr><td><code>METRICS_AUTH_TOKEN</code></td><td class="req">Обязательно для /metrics</td><td>Отдельный Bearer-токен endpoint метрик.</td></tr>
+            <tr><td><code>METRICS_ALLOWED_PROJECTS</code></td><td>CSV project slug</td><td>Закрытый список допустимых project labels.</td></tr>
+            <tr><td><code>OTEL_DEPLOYMENT_ENVIRONMENT</code></td><td><code>production</code></td><td>Environment label временных рядов и JSON-логов.</td></tr>
+            <tr><td><code>OTEL_METRICS_EXPORTER</code></td><td><code>none</code> / <code>otlp</code></td><td>Транспорт метрик.</td></tr>
+            <tr><td><code>OTEL_EXPORTER_OTLP_ENDPOINT</code></td><td>URL Grafana Cloud</td><td>OTLP/HTTPS endpoint.</td></tr>
+            <tr><td><code>OTEL_EXPORTER_OTLP_HEADERS</code></td><td class="req">Секрет Grafana</td><td>OTLP Authorization header; хранится только в Railway Variables.</td></tr>
           </tbody>
         </table></div>
       </section>
 
+      <section id="access">
+        <h2>Разделы и индивидуальные токены</h2>
+        <p>Каждый материал относится к одному разделу: <code>memento/&lt;project&gt;</code> или <code>research/&lt;workspace&gt;</code>. Токен разработчика, агента, CI или сервиса получает <code>read</code>, <code>publish</code> либо <code>admin</code> только для нужных разделов.</p>
+        <div class="grid">
+          <div class="card"><h3>Первый администратор</h3><pre><code>uv run library-admin tokens bootstrap --name platform-admin</code></pre><p>Сохраните поле <code>token</code> в password manager: повторно оно не отображается.</p></div>
+          <div class="card"><h3>Токен агента</h3><pre><code>uv run library-admin --token "$ADMIN_TOKEN" tokens create \\
+  --name backend-agent --subject-type agent \\
+  --grant memento/backend:read,publish</code></pre></div>
+        </div>
+        <p>REST и MCP принимают один формат: <code>Authorization: Bearer rl_&lt;prefix&gt;_&lt;secret&gt;</code>. Недоступный item возвращается как 404. Search обращается только к разрешённым non-federated GBrain sources.</p>
+        <div class="note">Полный runbook выдачи, ротации, отзыва, legacy-перехода и backup: <a href="access-control.md">docs/access-control.md</a>.</div>
+      </section>
       <section id="telegram">
         <h2>Использование Telegram-бота</h2>
         <p>Основной интерфейс — естественный русский язык. Slash-команды являются необязательными алиасами тех же прикладных скиллов.</p>
@@ -256,7 +285,7 @@ LOG_LEVEL=INFO</code></pre>
 
       <section id="api">
         <h2>REST API</h2>
-        <p>Базовый адрес в Railway: <code>https://ВАШ-ДОМЕН</code>. Защищённые маршруты принимают <code>Authorization: Bearer &lt;LIBRARY_API_TOKEN&gt;</code>. Для создающих запросов используйте уникальный заголовок <code>Idempotency-Key</code>.</p>
+        <p>Базовый адрес в Railway: <code>https://ВАШ-ДОМЕН</code>. Защищённые маршруты принимают <code>Authorization: Bearer rl_&lt;prefix&gt;_&lt;secret&gt;</code>. Для создающих запросов используйте уникальный заголовок <code>Idempotency-Key</code>.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Метод и путь</th><th>Назначение</th></tr></thead>
           <tbody>
@@ -275,15 +304,16 @@ LOG_LEVEL=INFO</code></pre>
         </table></div>
         <h3>Поиск</h3>
         <pre><code>curl -X POST "https://ВАШ-ДОМЕН/v1/search" \
-  -H "Authorization: Bearer $LIBRARY_API_TOKEN" \
+  -H "Authorization: Bearer $LIBRARY_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"query":"векторный поиск","limit":10}'</code></pre>
         <h3>Создание заметки</h3>
         <pre><code>curl -X POST "https://ВАШ-ДОМЕН/v1/items" \
-  -H "Authorization: Bearer $LIBRARY_API_TOKEN" \
+  -H "Authorization: Bearer $LIBRARY_ACCESS_TOKEN" \
   -H "Idempotency-Key: note-2026-08-18-001" \
   -H "Content-Type: application/json" \
   -d '{
+    "section":{"domain":"research","key":"main"},
     "type":"note",
     "title":"Наблюдение по эксперименту",
     "content":"Полный текст материала",
@@ -294,9 +324,9 @@ LOG_LEVEL=INFO</code></pre>
 
       <section id="mcp">
         <h2>Подключение внешнего MCP-клиента</h2>
-        <p>Сервис публикует Streamable HTTP endpoint <code>POST /mcp</code>. К нему подключается другой сервис или агент по HTTPS и передаёт отдельный Bearer-токен из <code>MCP_AUTH_TOKEN</code>.</p>
+        <p>Сервис публикует Streamable HTTP endpoint <code>POST /mcp</code>. К нему подключается другой сервис или агент по HTTPS и передаёт выданный ему project-scoped Bearer-токен.</p>
         <pre><code>URL: https://ВАШ-ДОМЕН/mcp
-Authorization: Bearer ВАШ_MCP_AUTH_TOKEN
+Authorization: Bearer rl_&lt;prefix&gt;_&lt;secret&gt;
 Transport: Streamable HTTP</code></pre>
         <div class="note"><strong>В репозитории и Railway-контейнере не устанавливается Codex и не запускается MCP-клиент.</strong> Здесь работает только MCP-сервер библиотеки. Внешний клиент настраивается в собственном репозитории или окружении.</div>
         <h3>Доступные MCP tools</h3>
@@ -306,11 +336,67 @@ Transport: Streamable HTTP</code></pre>
             <tr><td><code>library_search</code></td><td>Поиск без LLM-синтеза</td></tr>
             <tr><td><code>library_get</code></td><td>Получение материала по ID или slug</td></tr>
             <tr><td><code>library_get_related</code></td><td>Получение явно связанных материалов</td></tr>
+            <tr><td><code>library_get_context</code></td><td>Поиск контекста разработки по свободному описанию</td></tr>
+            <tr><td><code>library_publish_context</code></td><td>Публикация решения, checkpoint, проблемы или тестового свидетельства</td></tr>
             <tr><td><code>library_save_experiment_report</code></td><td>Сохранение итогового отчёта эксперимента</td></tr>
             <tr><td><code>library_save_idea</code></td><td>Сохранение исследовательской идеи</td></tr>
             <tr><td><code>library_save_publication</code></td><td>Сохранение метаданных публикации</td></tr>
           </tbody>
         </table></div>
+      </section>
+
+      <section id="memento">
+        <h2>Memento: общая память агентов</h2>
+        <p>Linear остаётся источником задач, Git — источником кода, а Библиотека хранит причины решений, подтверждённые результаты и состояние реализации. Codex, Cursor и Claude Code подключаются к <code>/mcp</code> как внешние клиенты.</p>
+        <h3>Найти контекст</h3>
+        <pre><code>{
+  "query": "Пользователя периодически выбрасывает из системы",
+  "project": "platform",
+  "repository": "backend-api",
+  "work_item": "BUG-731",
+  "limit": 20
+}</code></pre>
+        <p>Старая задача, файл и commit не обязательны: GBrain ищет по всей сохранённой истории и возвращает фиксированные блоки реализаций, решений, проблем, тестов и checkpoints.</p>
+        <h3>Опубликовать контекст</h3>
+        <pre><code>{
+  "payload": {
+    "context_kind": "decision",
+    "project": "platform",
+    "repository": "backend-api",
+    "work_item": "AUTH-142",
+    "title": "Шифрование refresh token",
+    "content": "Refresh token шифруется перед сохранением.",
+    "created_by": "agent",
+    "verification": "unverified",
+    "consulted_context_item_ids": ["lib_использованный_источник"]
+  },
+  "idempotency_key": "memento:AUTH-142:decision:1"
+}</code></pre>
+        <div class="note">Записи неизменяемы. Исправление публикуется новой записью с <code>supersedes_item_id</code>. Фактически использованный контекст перечисляется в <code>consulted_context_item_ids</code> и сохраняется отношениями <code>has-source</code>.</div>
+        <p>Канонические сценарии находятся в <code>agent-skills/</code>: поиск контекста, запись знания, checkpoint перед переключением и возобновление работы.</p>
+      </section>
+
+      <section id="observability">
+        <h2>Наблюдаемость</h2>
+        <p>Research Library отправляет агрегированные метрики в Grafana Cloud по OTLP/HTTPS, а структурированные JSON-логи пишет в Railway stdout. Grafana не запускается внутри контейнера библиотеки.</p>
+        <pre><code>METRICS_ENABLED=true
+OTEL_METRICS_EXPORTER=otlp
+OTEL_EXPORTER_OTLP_ENDPOINT=https://&lt;grafana-cloud-otlp-endpoint&gt;
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic &lt;secret&gt;
+METRICS_ALLOWED_PROJECTS=platform,research</code></pre>
+        <p>Опциональный <code>/metrics</code> предназначен для локального/self-hosted Prometheus и всегда защищён отдельным токеном:</p>
+        <pre><code>METRICS_ENDPOINT_ENABLED=true
+METRICS_AUTH_TOKEN=&lt;отдельный-секрет&gt;
+
+curl -H "Authorization: Bearer $METRICS_AUTH_TOKEN" \
+  https://ВАШ-ДОМЕН/metrics</code></pre>
+        <ul>
+          <li>Каждый HTTP/MCP запрос получает <code>request_id</code>; он возвращается в <code>X-Request-ID</code> и связывает метрики с Railway logs.</li>
+          <li>Query, content, MCP payload, токены и document IDs не становятся metric labels.</li>
+          <li>Неизвестный project нормализуется в <code>_unknown</code>.</li>
+          <li>Недоступность OTLP backend не ломает REST, MCP, Telegram и retry worker.</li>
+        </ul>
+        <p>Готовый dashboard и alert rules находятся в <code>deploy/grafana/</code>. Полная инструкция — в <code>docs/observability.md</code>.</p>
       </section>
 
       <section id="data">
@@ -338,7 +424,7 @@ Transport: Streamable HTTP</code></pre>
           <thead><tr><th>Симптом</th><th>Причина и действие</th></tr></thead>
           <tbody>
             <tr><td>Ошибка при старте с Telegram token</td><td>Нет <code>OPENAI_API_KEY</code>. Добавьте обычный ключ OpenAI API.</td></tr>
-            <tr><td><code>401 Invalid token</code></td><td>Проверьте Bearer-токен: REST использует <code>LIBRARY_API_TOKEN</code>, MCP — <code>MCP_AUTH_TOKEN</code>.</td></tr>
+            <tr><td><code>401 Invalid token</code></td><td>Проверьте project-scoped Bearer-токен, срок действия и отзыв. Для запрета раздела ожидается 403, а для недоступного item — 404.</td></tr>
             <tr><td>Бот молчит</td><td>Проверьте <code>TELEGRAM_BOT_TOKEN</code>, числовой ID в allowlist и Railway logs.</td></tr>
             <tr><td><code>/readyz</code> не готов</td><td>Проверьте права записи в <code>/data/library</code>, подключение Volume и сообщения GBrain.</td></tr>
             <tr><td>После deploy пропали материалы</td><td>Volume не подключён или смонтирован не в тот путь. Используйте <code>/data/library</code>.</td></tr>
@@ -367,7 +453,8 @@ uv run uvicorn controllers.api.app:app --app-dir src --host 0.0.0.0 --port 8000<
         <h2>Проверочный список безопасности</h2>
         <ul>
           <li>Задайте <code>ALLOWED_TELEGRAM_USER_IDS</code> или <code>ALLOWED_TELEGRAM_CHAT_IDS</code>.</li>
-          <li>Используйте разные длинные случайные значения для <code>LIBRARY_API_TOKEN</code> и <code>MCP_AUTH_TOKEN</code>.</li>
+          <li>Включите <code>LIBRARY_AUTH_ENABLED=true</code>, сохраните <code>LIBRARY_TOKEN_PEPPER</code> в Railway Variables и выдавайте отдельный токен каждому субъекту.</li>
+          <li>Для <code>/metrics</code> используйте третий отдельный <code>METRICS_AUTH_TOKEN</code>.</li>
           <li>Не добавляйте токены в Git; храните их только в Railway Variables или локальном <code>.env</code>.</li>
           <li>Не публикуйте содержимое Railway logs, если в них могут быть пользовательские материалы.</li>
           <li>Регулярно создавайте резервную копию Volume и проверяйте восстановление.</li>

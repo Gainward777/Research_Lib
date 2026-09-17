@@ -3,6 +3,8 @@ from io import BytesIO
 from aiogram.types import Message
 
 from controllers.utils.bootstrap.dependencies import ApplicationContainer
+from controllers.utils.services.access.context import current_authorization
+from models.access import SectionDomain
 
 
 async def _upload_message_media(message: Message, container: ApplicationContainer) -> str | None:
@@ -22,7 +24,13 @@ async def _upload_message_media(message: Message, container: ApplicationContaine
         return None
     stream = BytesIO()
     await message.bot.download(downloadable, destination=stream)
-    result = await container.attachments.save_upload(stream.getvalue(), filename, content_type)
+    section_ref = await container.authorization.resolve_publish_section(
+        current_authorization(), None, domain=SectionDomain.RESEARCH
+    )
+    section = await container.sections_store.require(section_ref)
+    result = await container.attachments.save_upload(
+        stream.getvalue(), filename, content_type, section_id=section.id
+    )
     return str(result["upload_id"])
 
 

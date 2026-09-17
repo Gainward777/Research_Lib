@@ -1,29 +1,37 @@
-import secrets
+from fastapi import HTTPException, Request, status
 
-from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-
-security = HTTPBearer(auto_error=False)
+from controllers.utils.services.access.context import current_authorization
+from models.access import AuthorizationContext
 
 
-def _valid(candidate: str, configured: list[str]) -> bool:
-    return any(value and secrets.compare_digest(candidate, value) for value in configured)
+def bearer_from_header(value: str) -> str | None:
+    scheme, separator, candidate = value.partition(" ")
+    if not separator or scheme.casefold() != "bearer" or not candidate:
+        return None
+    return candidate
 
 
-async def require_read(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
-) -> None:
+async def require_read(request: Request) -> AuthorizationContext:
+    context = current_authorization()
     settings = request.app.state.container.settings
-    configured = [settings.library_api_token]
-    if not any(configured):
-        return
-    if credentials is None or not _valid(credentials.credentials, configured):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    if context.invalid_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if (
+        not settings.library_auth_enabled
+        and settings.library_api_token
+        and not context.authenticated
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return context
 
 
-async def require_write(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
-) -> None:
-    await require_read(request, credentials)
+async def require_write(request: Request) -> AuthorizationContext:
+    return await require_read(request)

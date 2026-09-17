@@ -32,7 +32,12 @@ class AttachmentStore:
         self.image_quality = image_quality
 
     async def save_upload(
-        self, content: bytes, filename: str | None, content_type: str | None
+        self,
+        content: bytes,
+        filename: str | None,
+        content_type: str | None,
+        *,
+        section_id: str = "sec_research_main",
     ) -> dict[str, object]:
         if not content:
             raise ValueError("Empty upload")
@@ -54,9 +59,18 @@ class AttachmentStore:
         relative_path = Path("_uploads") / f"{upload_id}-{safe_name(filename)}.{extension}"
         atomic_write_bytes(self.root / relative_path, processed)
         await self.database.execute(
-            "INSERT INTO uploads(id, path, sha256, mime_type, size_bytes, original_name) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (upload_id, relative_path.as_posix(), digest, mime_type, len(processed), filename),
+            "INSERT INTO uploads("
+            "id, path, sha256, mime_type, size_bytes, original_name, section_id"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                upload_id,
+                relative_path.as_posix(),
+                digest,
+                mime_type,
+                len(processed),
+                filename,
+                section_id,
+            ),
         )
         return {
             "upload_id": upload_id,
@@ -65,10 +79,14 @@ class AttachmentStore:
             "size_bytes": len(processed),
         }
 
-    async def consume(self, upload_id: str, item_id: str) -> Attachment:
+    async def consume(
+        self, upload_id: str, item_id: str, *, section_id: str
+    ) -> Attachment:
         row = await self.database.fetchone("SELECT * FROM uploads WHERE id = ?", (upload_id,))
         if row is None:
             raise ValueError(f"Unknown upload: {upload_id}")
+        if str(row["section_id"]) != section_id:
+            raise ValueError("Upload belongs to another section")
         source = self.root / row["path"]
         extension = source.suffix
         target_relative = (
@@ -92,6 +110,10 @@ class AttachmentStore:
             size_bytes=row["size_bytes"],
             original_name=row["original_name"],
         )
+
+    async def get(self, upload_id: str) -> dict[str, object] | None:
+        row = await self.database.fetchone("SELECT * FROM uploads WHERE id = ?", (upload_id,))
+        return dict(row) if row is not None else None
 
     async def discard(self, upload_id: str) -> None:
         row = await self.database.fetchone("SELECT * FROM uploads WHERE id = ?", (upload_id,))

@@ -8,6 +8,7 @@ from typing import Any
 from controllers.utils.BD.markdown import MarkdownItemRepository
 from controllers.utils.infrastructure.filesystem.atomic_writer import atomic_write_text
 from errors import SearchBackendError
+from models.access import SectionRef
 from models.commands import SearchCommand
 from models.enums import LibraryItemType
 from models.library_item import LibraryItem
@@ -17,7 +18,7 @@ from models.results import AnswerResult, SearchHit
 class GBrainAdapter:
     """Serialized adapter for the pinned official GBrain CLI and its PGLite engine."""
 
-    BOOTSTRAP_MARKER_NAME = ".research-library-bootstrap-v1"
+    BOOTSTRAP_MARKER_NAME = ".research-library-bootstrap-v2-sections"
 
     SAFE_ENVIRONMENT_NAMES = (
         "PATH",
@@ -68,6 +69,7 @@ class GBrainAdapter:
         # including reads, otherwise concurrent Telegram/API requests contend
         # for the same embedded database lock.
         self._process_lock = asyncio.Lock()
+        self._known_sources: set[str] = set()
 
     async def initialize(self) -> bool:
         """Create or migrate the persistent PGLite brain and verify its runtime.
@@ -153,26 +155,53 @@ class GBrainAdapter:
         if row is None:
             raise SearchBackendError(f"Cannot index unknown item: {item.id}")
         content = (self.repository.brain_root / row["path"]).read_bytes()
+        await self._ensure_source(item.section)
         # stdin avoids argv length limits for unstructured Telegram messages.
-        await self._run_command(["put", str(row["slug"])], content)
+        await self._run_command(
+            ["put", str(row["slug"])], content, source_id=item.section.gbrain_source_id
+        )
 
     async def search(self, command: SearchCommand) -> list[SearchHit]:
         # GBrain search accepts query/limit, while application-level type and tag
         # filters belong to the library contract and are applied after retrieval.
         gbrain_limit = 100 if command.types or command.tags else command.limit
-        result = await self._run_call("search", {"query": command.query, "limit": gbrain_limit})
+        source_id = self._command_source(command)
+        if command.sections:
+            await self._ensure_source(command.sections[0])
+        payload = {"query": command.query, "limit": gbrain_limit}
+        result = (
+            await self._run_call("search", payload, source_id=source_id)
+            if source_id
+            else await self._run_call("search", payload)
+        )
         hits = self._normalize_hits(result, gbrain_limit)
         return self._filter_hits(hits, command)[: command.limit]
 
     async def query(self, command: SearchCommand) -> list[SearchHit]:
-        result = await self._run_call("query", {"query": command.query, "limit": command.limit})
+        source_id = self._command_source(command)
+        if command.sections:
+            await self._ensure_source(command.sections[0])
+        payload = {"query": command.query, "limit": command.limit}
+        result = (
+            await self._run_call("query", payload, source_id=source_id)
+            if source_id
+            else await self._run_call("query", payload)
+        )
         return self._normalize_hits(result, command.limit)
 
     async def think(self, command: SearchCommand) -> AnswerResult:
         payload: dict[str, Any] = {"question": command.query}
         if self.think_model:
             payload["model"] = self.think_model
-        result = self._unwrap(await self._run_call("think", payload))
+        source_id = self._command_source(command)
+        if command.sections:
+            await self._ensure_source(command.sections[0])
+        raw_result = (
+            await self._run_call("think", payload, source_id=source_id)
+            if source_id
+            else await self._run_call("think", payload)
+        )
+        result = self._unwrap(raw_result)
         if not isinstance(result, dict):
             raise SearchBackendError("GBrain think returned an invalid response")
 
@@ -223,9 +252,45 @@ class GBrainAdapter:
                 f"GBrain version mismatch: expected {self.expected_version}, got {actual}"
             )
 
-    async def _run_call(self, operation: str, payload: dict[str, Any]) -> Any:
+    @staticmethod
+    def _command_source(command: SearchCommand) -> str | None:
+        if not command.sections:
+            return None
+        if len(command.sections) != 1:
+            raise SearchBackendError("A GBrain call must target exactly one section")
+        return command.sections[0].gbrain_source_id
+
+    async def _ensure_source(self, section: SectionRef) -> None:
+        source_id = section.gbrain_source_id
+        if source_id in self._known_sources:
+            return
+        source_path = self.home / "sources" / source_id
+        source_path.mkdir(parents=True, exist_ok=True)
+        try:
+            await self._run_command(
+                [
+                    "sources", "add", source_id, "--path", str(source_path),
+                    "--name", section.value, "--no-federated", "--force",
+                ]
+            )
+        except SearchBackendError as exc:
+            if "already" not in str(exc).casefold() and "exists" not in str(exc).casefold():
+                raise
+        self._known_sources.add(source_id)
+
+    async def _run_call(
+        self,
+        operation: str,
+        payload: dict[str, Any],
+        *,
+        source_id: str | None = None,
+    ) -> Any:
         compact = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        return await self._run_json(["call", operation, compact])
+        arguments = ["call"]
+        if source_id:
+            arguments.extend(["--source", source_id])
+        arguments.extend([operation, compact])
+        return await self._run_json(arguments)
 
     async def _run_json(self, arguments: list[str]) -> dict[str, Any]:
         decoded = (await self._run_command(arguments)).decode("utf-8", errors="replace").strip()
@@ -243,7 +308,13 @@ class GBrainAdapter:
                 raise SearchBackendError("GBrain returned invalid JSON") from None
         return value if isinstance(value, dict) else {"data": value}
 
-    async def _run_command(self, arguments: list[str], stdin: bytes | None = None) -> bytes:
+    async def _run_command(
+        self,
+        arguments: list[str],
+        stdin: bytes | None = None,
+        *,
+        source_id: str | None = None,
+    ) -> bytes:
         environment = {
             name: value
             for name in self.SAFE_ENVIRONMENT_NAMES
@@ -251,6 +322,8 @@ class GBrainAdapter:
         }
         environment["GBRAIN_HOME"] = str(self.home)
         environment["GBRAIN_NO_ONBOARD_NUDGE"] = "1"
+        if source_id:
+            environment["GBRAIN_SOURCE"] = source_id
         try:
             async with self._process_lock:
                 process = await asyncio.create_subprocess_exec(

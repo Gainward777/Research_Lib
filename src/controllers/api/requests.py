@@ -2,10 +2,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field, HttpUrl
 
+from models.access import SectionRef
 from models.enums import LibraryItemType, RelationType, SourceKind
 
 
 class CreateItemRequest(BaseModel):
+    section: SectionRef | None = None
     type: LibraryItemType
     title: str = Field(min_length=1, max_length=300)
     content: str = ""
@@ -19,6 +21,7 @@ class CreateItemRequest(BaseModel):
 
 
 class ExperimentReportRequest(BaseModel):
+    section: SectionRef | None = None
     source: str = "autoresearch"
     experiment_external_id: str
     iteration_external_id: str
@@ -37,12 +40,14 @@ class ExperimentReportRequest(BaseModel):
 
 
 class IdeaRequest(BaseModel):
+    section: SectionRef | None = None
     title: str
     content: str
     tags: list[str] = Field(default_factory=list)
 
 
 class PublicationRequest(BaseModel):
+    section: SectionRef | None = None
     title: str
     summary: str = ""
     url: HttpUrl | None = None
@@ -51,6 +56,7 @@ class PublicationRequest(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
+    sections: list[SectionRef] = Field(default_factory=list)
     types: list[LibraryItemType] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     limit: int = Field(default=10, ge=1, le=100)

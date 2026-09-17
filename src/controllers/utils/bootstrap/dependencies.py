@@ -1,23 +1,35 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from controllers.utils.BD.access import AccessStore
 from controllers.utils.BD.attachments import AttachmentStore
 from controllers.utils.BD.collections import CollectionStore
 from controllers.utils.BD.jobs import JobStore
 from controllers.utils.BD.markdown import MarkdownItemRepository
 from controllers.utils.BD.migrations import apply_migrations
 from controllers.utils.BD.receipts import ReceiptStore
+from controllers.utils.BD.sections import SectionStore
 from controllers.utils.BD.sqlite import Database
 from controllers.utils.bootstrap.settings import Settings
 from controllers.utils.infrastructure.gbrain.adapter import GBrainAdapter
+from controllers.utils.infrastructure.gbrain.observable_adapter import ObservableGBrainAdapter
 from controllers.utils.infrastructure.gbrain.schema_installer import install_research_schema
 from controllers.utils.infrastructure.llm.openai_responses import OpenAIResponsesClient
+from controllers.utils.infrastructure.observability.bootstrap import (
+    ObservabilityRuntime,
+    get_observability,
+)
+from controllers.utils.infrastructure.security.token_hasher import TokenHasher
+from controllers.utils.services.access.authorization_service import AuthorizationService
+from controllers.utils.services.access.section_service import SectionService
+from controllers.utils.services.access.token_service import TokenService
 from controllers.utils.services.ingestion.ingestion_service import IngestionService
 from controllers.utils.services.ingestion.job_service import JobService
 from controllers.utils.services.librarian.dialog_context import DialogContextStore
 from controllers.utils.services.librarian.search_service import SearchService
 from controllers.utils.services.library.idea_service import IdeaService
 from controllers.utils.services.library.item_service import ItemService
+from controllers.utils.services.library.observable_memento_service import ObservableMementoService
 from controllers.utils.services.library.publication_service import PublicationService
 from controllers.utils.services.library.relation_service import RelationService
 from controllers.utils.services.library.report_service import ReportService
@@ -45,7 +57,13 @@ class ApplicationContainer:
     jobs: JobService
     proposals: ProposalService
     ingestion: IngestionService
-
+    memento: ObservableMementoService
+    observability: ObservabilityRuntime
+    sections_store: SectionStore
+    access_store: AccessStore
+    authorization: AuthorizationService
+    section_service: SectionService
+    token_service: TokenService | None
     collections: CollectionStore
     dialog_context: DialogContextStore
     skills: SkillRegistry
@@ -62,13 +80,27 @@ async def build_container(
 ) -> ApplicationContainer:
     settings = settings or Settings()
     settings.ensure_directories()
+    observability = get_observability(settings)
     install_research_schema(settings.library_brain_root)
     database = Database(settings.library_sqlite_path)
     await database.connect()
     try:
         await apply_migrations(database)
 
-        repository = MarkdownItemRepository(settings.library_brain_root, database)
+        sections_store = SectionStore(database)
+        access_store = AccessStore(database)
+        pepper = settings.library_token_pepper.get_secret_value()
+        token_hasher = TokenHasher(pepper) if pepper else None
+        authorization = AuthorizationService(
+            settings,
+            access_store,
+            sections_store,
+            token_hasher,
+            observability.recorder,
+        )
+        repository = MarkdownItemRepository(
+            settings.library_brain_root, database, sections_store
+        )
         await repository.rebuild_catalog()
         attachments = AttachmentStore(
             settings.library_attachments_root,
@@ -80,7 +112,7 @@ async def build_container(
         receipts = ReceiptStore(database)
         jobs_store = JobStore(database)
         if gbrain_factory is None:
-            gbrain = GBrainAdapter(
+            gbrain = ObservableGBrainAdapter(
                 repository,
                 command=settings.library_gbrain_command,
                 timeout_seconds=settings.library_gbrain_timeout_seconds,
@@ -90,6 +122,7 @@ async def build_container(
                 embedding_model=settings.library_gbrain_embedding_model,
                 embedding_dimensions=settings.library_gbrain_embedding_dimensions,
                 think_model=settings.library_gbrain_think_model,
+                metrics=observability.recorder,
             )
         else:
             gbrain = gbrain_factory(repository)
@@ -102,7 +135,17 @@ async def build_container(
                 await repository.mark_indexed(item.id)
             gbrain.mark_bootstrap_complete()
 
-        items = ItemService(repository, attachments, receipts, jobs_store, gbrain)
+        items = ItemService(
+            repository,
+            attachments,
+            receipts,
+            jobs_store,
+            gbrain,
+            sections_store,
+            authorization,
+        )
+        search = SearchService(gbrain, authorization)
+        memento = ObservableMementoService(items, search, observability.recorder)
         skills = build_library_skill_registry()
         collections = CollectionStore(database)
         dialog_context = DialogContextStore(settings.library_router_context_turns)
@@ -114,6 +157,14 @@ async def build_container(
             ),
             skills,
         )
+        section_service = SectionService(sections_store, access_store, authorization)
+        token_service = (
+            TokenService(access_store, sections_store, token_hasher, authorization)
+            if token_hasher is not None
+            else None
+        )
+        if token_service is not None:
+            await token_service.refresh_metrics()
         return ApplicationContainer(
             settings=settings,
             database=database,
@@ -125,10 +176,17 @@ async def build_container(
             ideas=IdeaService(items),
             publications=PublicationService(items),
             relations=RelationService(items),
-            search=SearchService(gbrain),
-            jobs=JobService(jobs_store),
+            search=search,
+            memento=memento,
+            jobs=JobService(jobs_store, sections_store, authorization),
             proposals=ProposalService(database, settings.library_schema_mutation_mode),
             ingestion=IngestionService(items),
+            observability=observability,
+            sections_store=sections_store,
+            access_store=access_store,
+            authorization=authorization,
+            section_service=section_service,
+            token_service=token_service,
             collections=collections,
             dialog_context=dialog_context,
             skills=skills,

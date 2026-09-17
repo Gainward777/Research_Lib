@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     )
 
     telegram_bot_token: str = ""
+    library_telegram_access_token: SecretStr = SecretStr("")
     allowed_telegram_user_ids: list[int] = Field(default_factory=list)
     allowed_telegram_chat_ids: list[int] = Field(default_factory=list)
 
@@ -28,6 +29,13 @@ class Settings(BaseSettings):
     library_public_url: str = ""
     library_api_token: str = ""
     mcp_auth_token: str = ""
+    library_auth_enabled: bool = False
+    library_token_pepper: SecretStr = SecretStr("")
+    library_public_sections_enabled: bool = False
+    library_auth_fail_closed: bool = True
+    library_legacy_api_grants: str = ""
+    library_legacy_mcp_grants: str = ""
+    library_default_research_section: str = "research/main"
 
     library_gbrain_command: str = "gbrain"
     library_gbrain_home: Path | None = None
@@ -49,6 +57,19 @@ class Settings(BaseSettings):
     library_media_group_settle_seconds: float = 3
     library_job_poll_seconds: float = 1
     log_level: str = "INFO"
+    metrics_enabled: bool = False
+    metrics_endpoint_enabled: bool = False
+    metrics_auth_token: SecretStr = SecretStr("")
+    metrics_allowed_projects: list[str] = Field(default_factory=list)
+    otel_service_name: str = "research-library"
+    otel_service_version: str = "0.1.0"
+    otel_deployment_environment: str = "development"
+    otel_metrics_exporter: str = "none"
+    otel_exporter_otlp_endpoint: str = ""
+    otel_exporter_otlp_headers: SecretStr = SecretStr("")
+    otel_export_interval_milliseconds: int = Field(default=15000, ge=1000)
+    otel_export_timeout_seconds: float = Field(default=10, gt=0)
+    otel_max_export_batch_size: int = Field(default=512, ge=1, le=10000)
 
     @field_validator("allowed_telegram_user_ids", "allowed_telegram_chat_ids", mode="before")
     @classmethod
@@ -57,6 +78,15 @@ class Settings(BaseSettings):
             return []
         if isinstance(value, str):
             return [int(part.strip()) for part in value.split(",") if part.strip()]
+        return value
+
+    @field_validator("metrics_allowed_projects", mode="before")
+    @classmethod
+    def parse_string_list(cls, value: object) -> object:
+        if value in (None, ""):
+            return []
+        if isinstance(value, str):
+            return [part.strip().casefold() for part in value.split(",") if part.strip()]
         return value
 
     @field_validator("library_gbrain_embedding_dimensions", mode="before")
@@ -79,8 +109,29 @@ class Settings(BaseSettings):
                 )
         if self.telegram_bot_token and not self.openai_api_key.get_secret_value():
             raise ValueError("OPENAI_API_KEY is required when TELEGRAM_BOT_TOKEN is configured")
+        if (
+            self.telegram_bot_token
+            and self.library_auth_enabled
+            and not self.library_telegram_access_token.get_secret_value()
+        ):
+            raise ValueError(
+                "LIBRARY_TELEGRAM_ACCESS_TOKEN is required for Telegram when auth is enabled"
+            )
         if not self.library_router_model:
             raise ValueError("LIBRARY_ROUTER_MODEL must not be empty")
+        if self.otel_metrics_exporter not in {"none", "otlp"}:
+            raise ValueError("OTEL_METRICS_EXPORTER must be none or otlp")
+        if self.metrics_enabled:
+            if self.otel_metrics_exporter != "otlp":
+                raise ValueError("METRICS_ENABLED requires OTEL_METRICS_EXPORTER=otlp")
+            if not self.otel_exporter_otlp_endpoint:
+                raise ValueError("OTEL_EXPORTER_OTLP_ENDPOINT is required when metrics are enabled")
+        if self.metrics_endpoint_enabled and not self.metrics_auth_token.get_secret_value():
+            raise ValueError("METRICS_AUTH_TOKEN is required when metrics endpoint is enabled")
+        if self.library_auth_enabled and not self.library_token_pepper.get_secret_value():
+            raise ValueError("LIBRARY_TOKEN_PEPPER is required when project auth is enabled")
+        if self.library_auth_enabled and not self.library_auth_fail_closed:
+            raise ValueError("LIBRARY_AUTH_FAIL_CLOSED must be true when project auth is enabled")
         return self
 
     def model_post_init(self, __context: object) -> None:

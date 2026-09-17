@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from models.access import SectionRef
 from models.enums import LibraryItemType, RelationType, SourceKind
 
 
@@ -27,6 +28,7 @@ class Attachment(BaseModel):
 
 class LibraryItem(BaseModel):
     id: str = Field(default_factory=new_library_item_id)
+    section: SectionRef = Field(default_factory=lambda: SectionRef.parse("research/main"))
     type: LibraryItemType
     title: str = Field(min_length=1, max_length=300)
     content: str = ""

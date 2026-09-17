@@ -20,3 +20,11 @@ class StorageError(ResearchLibraryError):
 
 class SearchBackendError(ResearchLibraryError):
     pass
+
+
+class AuthenticationRequiredError(ResearchLibraryError):
+    pass
+
+
+class PermissionDeniedError(ResearchLibraryError):
+    pass

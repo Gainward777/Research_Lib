@@ -683,15 +683,87 @@ MCP-сервер является частью `Research_Lib` и публику�
 library_search
 library_get
 library_get_related
+library_get_context
+library_publish_context
 library_save_experiment_report
 library_save_idea
 library_save_publication
 ```
 
-Доступ защищается нейтральным `MCP_AUTH_TOKEN`. Административное применение
-schema mutations, удаление страниц и внутренний GBrain adapter наружу не
-публикуются. Клиент отвечает за retry с тем же idempotency key и не отправляет
-secrets, checkpoints, полные логи или внутреннее состояние эксперимента.
+`library_get_context` передаёт свободное описание задачи или бага в GBrain и
+возвращает найденную историю в фиксированных блоках: реализации, решения,
+проблемы, доказательства тестов и checkpoints. Старая Linear-задача, файл, символ
+или commit не являются обязательными параметрами.
+
+`library_publish_context` сохраняет неизменяемую страницу типа
+`development-context` через общий `ItemService`. Исправления создают новую
+страницу с `supersedes_item_id`; Git остаётся источником кода, а Linear —
+источником задач и назначений.
+Фактически использованные записи перечисляются в
+`consulted_context_item_ids` и связываются отношениями `has-source`.
+
+Доступ REST и MCP проверяется одной моделью project-scoped bearer tokens.
+`MCP_AUTH_TOKEN` и `LIBRARY_API_TOKEN` остаются только compatibility adapter с
+явными legacy grants. Административное применение schema mutations, удаление
+страниц и внутренний GBrain adapter наружу не публикуются. Клиент отвечает за retry с тем же idempotency key и не отправляет
+secrets, полные логи или внутреннее состояние модели.
+
+Канонические workflows внешних агентов хранятся в `agent-skills/`, но выполняются
+только в Codex, Cursor, Claude Code или другой клиентской среде. Research Library
+не содержит агентный runtime.
+
+### 14.1. Граница доступа section
+
+Каждый `LibraryItem`, upload, ingest job и idempotency receipt относится ровно к
+одному `section`: `memento/<project>` или `research/<workspace>`. Раздел является
+границей доступа; document-level ACL отсутствует.
+
+```text
+HTTP/MCP bearer
+  -> AuthorizationContext
+  -> AuthorizationService (read/publish/admin)
+  -> section-aware Item/Search/Memento services
+  -> Markdown + SQLite + isolated non-federated GBrain source
+```
+
+- `public`, `authenticated`, `restricted` задают только чтение;
+- запись всегда требует `publish`;
+- `admin` управляет своим section, `system_admin` — глобальными объектами;
+- GBrain search запускается отдельно на каждом разрешённом source;
+- недоступный item маскируется как `404`;
+- исходный token никогда не хранится, используется HMAC с secret pepper;
+- bootstrap и lifecycle выполняет `library-admin`, а не MCP.
+
+Stores находятся в `Controllers/utils/BD`, auth services — в
+`Controllers/utils/services/access`, hashing — в
+`Controllers/utils/infrastructure/security`. Полный runbook:
+[`docs/access-control.md`](docs/access-control.md).
+
+### 14.2. Observability
+
+Observability является инфраструктурой Controllers и не входит в Model:
+
+```text
+controllers/utils/infrastructure/observability/
+├── bootstrap.py
+├── context.py
+├── logging.py
+└── metrics.py
+```
+
+- MementoService и GBrain adapter получают recorder через dependency container;
+- каждый HTTP/MCP запрос имеет изолированный contextvars `request_id`;
+- metrics содержат только фиксированные outcomes/operations/blocks и project из
+  `METRICS_ALLOWED_PROJECTS`;
+- query, content, payload, токены, item ID, commit, branch и path запрещены как
+  metric labels;
+- JSON-логи отправляются только в stdout Railway;
+- OTLP export работает fail-safe и не влияет на бизнес-операцию;
+- `/metrics` является скрытым Controller endpoint с отдельным Bearer-токеном;
+- Grafana не встраивается в приложение и разворачивается внешне.
+
+Versioned dashboard и alerts находятся в `deploy/grafana/`, эксплуатационный
+контракт — в `docs/observability.md`.
 ## 15. Идемпотентность
 
 Форматы ключей:
@@ -757,6 +829,7 @@ LIBRARY_SCHEMA_MUTATION_MODE=propose
 
 ```text
 TELEGRAM_BOT_TOKEN=
+LIBRARY_TELEGRAM_ACCESS_TOKEN=
 ALLOWED_TELEGRAM_USER_IDS=
 ALLOWED_TELEGRAM_CHAT_IDS=
 OPENAI_API_KEY=
@@ -771,8 +844,16 @@ LIBRARY_ATTACHMENTS_ROOT=/data/library/brain/attachments
 LIBRARY_SQLITE_PATH=/data/library/library.sqlite3
 
 LIBRARY_PUBLIC_URL=
+
+LIBRARY_AUTH_ENABLED=true
+LIBRARY_TOKEN_PEPPER=
+LIBRARY_PUBLIC_SECTIONS_ENABLED=false
+LIBRARY_AUTH_FAIL_CLOSED=true
+LIBRARY_DEFAULT_RESEARCH_SECTION=research/main
 LIBRARY_API_TOKEN=
 MCP_AUTH_TOKEN=
+LIBRARY_LEGACY_API_GRANTS=
+LIBRARY_LEGACY_MCP_GRANTS=
 
 LIBRARY_GBRAIN_COMMAND=gbrain
 LIBRARY_GBRAIN_HOME=/data/library/gbrain

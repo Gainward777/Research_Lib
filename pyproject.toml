@@ -25,13 +25,19 @@ dependencies = [
     "fastapi>=0.116,<1",
     "httpx>=0.28,<1",
     "mcp>=2,<3",
+    "opentelemetry-exporter-otlp-proto-http>=1.44,<2",
+    "opentelemetry-sdk>=1.44,<2",
     "pillow>=11.3,<13",
+    "prometheus-client>=0.22,<1",
     "pydantic>=2.11,<3",
     "pydantic-settings>=2.10,<3",
     "python-multipart>=0.0.20,<1",
     "pyyaml>=6.0.2,<7",
     "uvicorn[standard]>=0.35,<1",
 ]
+
+[project.scripts]
+library-admin = "controllers.admin.cli:main"
 
 [dependency-groups]
 dev = [
@@ -54,3 +60,4 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/controllers/api/*.py" = ["B008"]
+"src/controllers/admin/*.py" = ["B008"]

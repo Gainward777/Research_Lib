@@ -15,9 +15,13 @@ class ReceiptStore:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    async def get(self, key: str, expected_hash: str) -> dict[str, Any] | None:
+    async def get(
+        self, key: str, section_id: str, expected_hash: str
+    ) -> dict[str, Any] | None:
         row = await self.database.fetchone(
-            "SELECT payload_hash, response_json FROM idempotency_receipts WHERE key = ?", (key,)
+            "SELECT payload_hash, response_json FROM idempotency_receipts "
+            "WHERE key = ? AND section_id = ?",
+            (key, section_id),
         )
         if row is None:
             return None
@@ -25,9 +29,12 @@ class ReceiptStore:
             raise IdempotencyConflictError("Idempotency key was already used with another payload")
         return json.loads(row["response_json"]) if row["response_json"] else None
 
-    async def save(self, key: str, digest: str, response: dict[str, Any]) -> None:
+    async def save(
+        self, key: str, section_id: str, digest: str, response: dict[str, Any]
+    ) -> None:
         await self.database.execute(
-            "INSERT INTO idempotency_receipts(key, payload_hash, status, response_json) "
-            "VALUES (?, ?, 'completed', ?)",
-            (key, digest, json.dumps(response, ensure_ascii=False)),
+            "INSERT INTO idempotency_receipts("
+            "key, section_id, payload_hash, status, response_json"
+            ") VALUES (?, ?, ?, 'completed', ?)",
+            (key, section_id, digest, json.dumps(response, ensure_ascii=False)),
         )

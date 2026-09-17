@@ -1,11 +1,21 @@
-import secrets
-
 from fastapi import Request
 
+from controllers.api.auth import bearer_from_header
+from models.access import AuthorizationContext
 
-def is_mcp_authorized(request: Request) -> bool:
-    configured = request.app.state.container.settings.mcp_auth_token
-    if not configured:
-        return True
-    scheme, _, candidate = request.headers.get("Authorization", "").partition(" ")
-    return scheme.casefold() == "bearer" and secrets.compare_digest(candidate, configured)
+
+async def resolve_mcp_authorization(request: Request) -> AuthorizationContext:
+    container = request.app.state.container
+    token = bearer_from_header(request.headers.get("Authorization", ""))
+    return await container.authorization.authenticate(token, legacy_surface="mcp")
+
+
+def mcp_auth_required_and_missing(
+    request: Request, context: AuthorizationContext
+) -> bool:
+    settings = request.app.state.container.settings
+    return (
+        not settings.library_auth_enabled
+        and bool(settings.mcp_auth_token)
+        and not context.authenticated
+    )

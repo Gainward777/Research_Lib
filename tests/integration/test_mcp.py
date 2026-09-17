@@ -39,6 +39,8 @@ def test_streamable_http_endpoint_and_auth(client) -> None:
         "library_search",
         "library_get",
         "library_get_related",
+        "library_get_context",
+        "library_publish_context",
         "library_save_experiment_report",
         "library_save_idea",
         "library_save_publication",
@@ -59,6 +61,8 @@ async def test_mcp_tools_and_round_trip(tmp_path: Path, monkeypatch) -> None:
         "library_search",
         "library_get",
         "library_get_related",
+        "library_get_context",
+        "library_publish_context",
         "library_save_experiment_report",
         "library_save_idea",
         "library_save_publication",
@@ -78,3 +82,31 @@ async def test_mcp_tools_and_round_trip(tmp_path: Path, monkeypatch) -> None:
     found = await dispatch("library_search", {"query": "durable MCP marker", "limit": 5})
 
     assert found["hits"][0]["item_id"] == saved["item_id"]
+
+    context = await dispatch(
+        "library_publish_context",
+        {
+            "payload": {
+                "context_kind": "problem",
+                "project": "platform",
+                "repository": "backend-api",
+                "work_item": "BUG-731",
+                "title": "Unexpected logout",
+                "content": "Users are logged out after refresh token expiration.",
+                "commit": "d91f203",
+                "paths": ["src/auth/oauth.py"],
+            },
+            "idempotency_key": "memento:BUG-731:problem:1",
+        },
+    )
+    context_bundle = await dispatch(
+        "library_get_context",
+        {
+            "query": "logged out refresh token",
+            "project": "platform",
+            "repository": "backend-api",
+        },
+    )
+
+    assert context_bundle["known_problems"][0]["item_id"] == context["item_id"]
+    assert context_bundle["known_problems"][0]["work_item"] == "BUG-731"

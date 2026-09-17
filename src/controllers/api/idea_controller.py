@@ -16,6 +16,10 @@ async def save_idea(
     container: ApplicationContainer = Depends(get_container),
 ) -> SaveResponse:
     result = await container.ideas.save(
-        request.title, request.content, request.tags, idempotency_key
+        request.title,
+        request.content,
+        request.tags,
+        idempotency_key,
+        section=request.section,
     )
     return SaveResponse.model_validate(result.model_dump())

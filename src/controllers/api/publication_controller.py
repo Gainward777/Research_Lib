@@ -23,5 +23,6 @@ async def save_publication(
         str(request.url) if request.url else None,
         request.authors,
         idempotency_key,
+        section=request.section,
     )
     return SaveResponse.model_validate(result.model_dump())

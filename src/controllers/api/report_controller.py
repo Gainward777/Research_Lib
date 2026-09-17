@@ -20,12 +20,19 @@ async def save_report(
 ) -> SaveResponse:
     report = ExperimentReport.model_validate(
         request.model_dump(
-            exclude={"source", "artifact_upload_ids", "source_library_item_ids", "autoresearch_url"}
+            exclude={
+                "section",
+                "source",
+                "artifact_upload_ids",
+                "source_library_item_ids",
+                "autoresearch_url",
+            }
         )
     )
     result = await container.reports.save(
         report,
         attachment_upload_ids=request.artifact_upload_ids,
         idempotency_key=idempotency_key,
+        section=request.section,
     )
     return SaveResponse.model_validate(result.model_dump())

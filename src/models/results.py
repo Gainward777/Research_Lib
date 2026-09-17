@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from models.enums import LibraryItemType
 
@@ -8,6 +8,7 @@ class SaveResult(BaseModel):
     slug: str
     created: bool
     indexed: bool
+    _deduplicated: bool = PrivateAttr(default=False)
     warnings: list[str] = Field(default_factory=list)
 
 

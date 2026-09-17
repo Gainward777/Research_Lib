@@ -49,9 +49,11 @@ $body = @{
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/items -Headers $headers -ContentType application/json -Body $body
 ```
 
-Если `LIBRARY_API_TOKEN` пуст, локальный REST API работает без авторизации.
-Endpoint `/mcp` защищается отдельно через `MCP_AUTH_TOKEN`. В production задайте
-оба токена, если REST API и MCP доступны по публичному домену.
+По умолчанию `LIBRARY_AUTH_ENABLED=false` сохраняет удобный локальный режим без
+авторизации. Для проверки production-модели задайте `LIBRARY_AUTH_ENABLED=true`,
+`LIBRARY_TOKEN_PEPPER` и выпустите индивидуальные токены через `library-admin`.
+REST и `/mcp` используют один project-scoped token. Старые `LIBRARY_API_TOKEN` и
+`MCP_AUTH_TOKEN` работают только с явными legacy grants.
 
 ## Telegram
 
@@ -76,12 +78,14 @@ Streamable HTTP MCP запускается внутри основного FastA
 
 ```powershell
 $env:PYTHONPATH = 'src'
-$env:MCP_AUTH_TOKEN = 'local-mcp-token'
+$env:LIBRARY_AUTH_ENABLED = 'true'
+$env:LIBRARY_TOKEN_PEPPER = 'local-test-pepper'
 uv run uvicorn main:app --app-dir src --reload
 ```
 
 MCP-клиент подключается к `http://127.0.0.1:8000/mcp` с заголовком
-`Authorization: Bearer local-mcp-token`.
+`Authorization: Bearer rl_<prefix>_<secret>`. Инструкции bootstrap находятся в
+[`docs/access-control.md`](docs/access-control.md).
 
 Для локального stdio-подключения сервер можно запустить отдельно:
 
@@ -94,9 +98,49 @@ MCP tools:
 - `library_search`;
 - `library_get`;
 - `library_get_related`;
+- `library_get_context`;
+- `library_publish_context`;
 - `library_save_experiment_report`;
 - `library_save_idea`;
 - `library_save_publication`.
+
+Memento ищет историю разработки по свободному описанию. Ссылка на старую задачу
+не обязательна:
+
+```json
+{
+  "query": "Пользователя периодически выбрасывает из системы",
+  "project": "platform",
+  "repository": "backend-api",
+  "work_item": "BUG-731",
+  "limit": 20
+}
+```
+
+Контекст публикуется неизменяемой записью с уникальным idempotency key:
+
+```json
+{
+  "payload": {
+    "context_kind": "decision",
+    "project": "platform",
+    "repository": "backend-api",
+    "work_item": "AUTH-142",
+    "title": "Шифрование refresh token",
+    "content": "Refresh token шифруется перед сохранением.",
+    "created_by": "agent",
+    "verification": "unverified",
+    "consulted_context_item_ids": ["lib_фактически_использованный_источник"]
+  },
+  "idempotency_key": "memento:AUTH-142:decision:1"
+}
+```
+
+Переносимые сценарии внешних агентов находятся в `agent-skills/`.
+Настройка OTLP, закрытого `/metrics`, JSON-логов, Grafana dashboard и alerts
+описана в [`docs/observability.md`](docs/observability.md). Локальные тесты не
+требуют Grafana Cloud и по умолчанию используют no-op recorder.
+
 
 ## Эксплуатационные команды
 

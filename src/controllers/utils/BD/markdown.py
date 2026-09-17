@@ -6,8 +6,10 @@ from typing import Any
 
 import yaml
 
+from controllers.utils.BD.sections import SectionStore
 from controllers.utils.BD.sqlite import Database
 from controllers.utils.infrastructure.filesystem.atomic_writer import atomic_write_text
+from models.access import SectionDomain, SectionRef
 from models.enums import LibraryItemType
 from models.library_item import LibraryItem
 
@@ -22,6 +24,7 @@ TYPE_DIRECTORIES: dict[LibraryItemType, str] = {
     LibraryItemType.DATASET: "datasets",
     LibraryItemType.SOURCE: "sources",
     LibraryItemType.NOTE: "inbox",
+    LibraryItemType.DEVELOPMENT_CONTEXT: "memento",
 }
 
 
@@ -32,11 +35,17 @@ def slugify(value: str) -> str:
 
 
 class MarkdownItemRepository:
-    def __init__(self, brain_root: Path, database: Database) -> None:
+    def __init__(
+        self, brain_root: Path, database: Database, sections: SectionStore | None = None
+    ) -> None:
         self.brain_root = brain_root
         self.database = database
+        self.sections = sections or SectionStore(database)
 
     async def save(self, item: LibraryItem) -> str:
+        section = await self.sections.ensure(item.section)
+        if item.section.tag not in item.tags:
+            item.tags.append(item.section.tag)
         existing = await self.database.fetchone(
             "SELECT path, slug, created_at FROM library_items WHERE id = ?", (item.id,)
         )
@@ -54,20 +63,23 @@ class MarkdownItemRepository:
         atomic_write_text(path, self.render(item))
         await self.database.execute(
             "INSERT INTO library_items("
-            "id, path, slug, type, title, created_at, updated_at, indexed) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 0) "
+            "id, path, slug, type, title, section_id, created_at, updated_at, indexed"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) "
             "ON CONFLICT(id) DO UPDATE SET path=excluded.path, slug=excluded.slug, "
-            "type=excluded.type, title=excluded.title, updated_at=excluded.updated_at, indexed=0",
+            "type=excluded.type, title=excluded.title, section_id=excluded.section_id, "
+            "updated_at=excluded.updated_at, indexed=0",
             (
                 item.id,
                 relative_path.as_posix(),
                 slug,
                 item.type.value,
                 item.title,
+                section.id,
                 item.created_at.isoformat(),
                 item.updated_at.isoformat(),
             ),
         )
+        await self._backfill_dependents(item, section.id)
         return slug
 
     async def mark_indexed(self, item_id: str, indexed: bool = True) -> None:
@@ -86,11 +98,14 @@ class MarkdownItemRepository:
                 return self.parse(path.read_text(encoding="utf-8")), str(row["slug"])
 
         for path in self.iter_pages():
-            item = self.parse(path.read_text(encoding="utf-8"))
+            raw = path.read_text(encoding="utf-8")
+            item = self.parse(raw)
             relative_path = path.relative_to(self.brain_root)
             slug = relative_path.with_suffix("").as_posix()
             if item.id == item_id_or_slug or slug == item_id_or_slug:
                 await self._register(item, relative_path, slug)
+                if "section:" not in raw.split("---", 2)[1]:
+                    atomic_write_text(path, self.render(item))
                 return item, slug
         return None
 
@@ -106,18 +121,25 @@ class MarkdownItemRepository:
     async def rebuild_catalog(self) -> int:
         count = 0
         for path in self.iter_pages():
-            item = self.parse(path.read_text(encoding="utf-8"))
+            raw = path.read_text(encoding="utf-8")
+            item = self.parse(raw)
+            if item.section.tag not in item.tags:
+                item.tags.append(item.section.tag)
             relative_path = path.relative_to(self.brain_root)
             await self._register(item, relative_path, relative_path.with_suffix("").as_posix())
+            if "section:" not in raw.split("---", 2)[1]:
+                atomic_write_text(path, self.render(item))
             count += 1
         return count
 
     async def _register(self, item: LibraryItem, relative_path: Path, slug: str) -> None:
+        section = await self.sections.ensure(item.section)
         await self.database.execute(
             "INSERT INTO library_items("
-            "id, path, slug, type, title, created_at, updated_at, indexed) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 0) ON CONFLICT(id) DO UPDATE SET "
-            "path=excluded.path, slug=excluded.slug, type=excluded.type, title=excluded.title, "
+            "id, path, slug, type, title, section_id, created_at, updated_at, indexed"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) ON CONFLICT(id) DO UPDATE SET "
+            "path=excluded.path, slug=excluded.slug, type=excluded.type, "
+            "title=excluded.title, section_id=excluded.section_id, "
             "updated_at=excluded.updated_at",
             (
                 item.id,
@@ -125,9 +147,29 @@ class MarkdownItemRepository:
                 slug,
                 item.type.value,
                 item.title,
+                section.id,
                 item.created_at.isoformat(),
                 item.updated_at.isoformat(),
             ),
+        )
+        await self._backfill_dependents(item, section.id)
+
+    async def _backfill_dependents(
+        self, item: LibraryItem, section_id: str
+    ) -> None:
+        for attachment in item.attachments:
+            await self.database.execute(
+                "UPDATE uploads SET section_id=? WHERE id=?",
+                (section_id, attachment.id),
+            )
+        await self.database.execute(
+            "UPDATE ingest_jobs SET section_id=? WHERE item_id=?",
+            (section_id, item.id),
+        )
+        await self.database.execute(
+            "UPDATE idempotency_receipts SET section_id=? "
+            "WHERE json_extract(response_json, '$.item_id')=?",
+            (section_id, item.id),
         )
 
     @staticmethod
@@ -160,6 +202,21 @@ class MarkdownItemRepository:
             raise ValueError("Markdown page has no YAML frontmatter")
         _, raw_frontmatter, body = content.split("---", 2)
         data: dict[str, Any] = yaml.safe_load(raw_frontmatter) or {}
+        if "section" not in data:
+            if data.get("type") == LibraryItemType.DEVELOPMENT_CONTEXT.value:
+                project = str((data.get("metadata") or {}).get("project") or "_unassigned")
+                try:
+                    data["section"] = SectionRef(
+                        domain=SectionDomain.MEMENTO, key=project
+                    ).model_dump(mode="json")
+                except ValueError:
+                    data["section"] = SectionRef.parse(
+                        "memento/_unassigned"
+                    ).model_dump(mode="json")
+            else:
+                data["section"] = SectionRef.parse(
+                    "research/main"
+                ).model_dump(mode="json")
         summary = ""
         main_content = ""
         if "## Резюме" in body:

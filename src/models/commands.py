@@ -2,10 +2,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from models.access import SectionRef
 from models.enums import LibraryItemType, SourceKind
 
 
 class CreateItemCommand(BaseModel):
+    section: SectionRef | None = None
     type: LibraryItemType
     title: str = Field(min_length=1, max_length=300)
     content: str = ""
@@ -20,6 +22,7 @@ class CreateItemCommand(BaseModel):
 
 class SearchCommand(BaseModel):
     query: str = Field(min_length=1)
+    sections: list[SectionRef] = Field(default_factory=list)
     types: list[LibraryItemType] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     limit: int = Field(default=10, ge=1, le=100)

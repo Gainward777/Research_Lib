@@ -12,6 +12,7 @@ class LibraryItemType(StrEnum):
     DATASET = "dataset"
     SOURCE = "source"
     NOTE = "note"
+    DEVELOPMENT_CONTEXT = "development-context"
 
 
 class SourceKind(StrEnum):
@@ -19,6 +20,7 @@ class SourceKind(StrEnum):
     AUTORESEARCH = "autoresearch"
     API = "api"
     MANUAL = "manual"
+    AGENT = "agent"
 
 
 class RelationType(StrEnum):

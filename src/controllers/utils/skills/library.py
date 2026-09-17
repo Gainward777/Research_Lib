@@ -1,6 +1,8 @@
+from controllers.utils.services.access.context import current_authorization
 from controllers.utils.services.ingestion.classifier import classify_material
 from controllers.utils.skills.models import SkillArguments, SkillContext
 from controllers.utils.skills.registry import SkillDefinition, SkillRegistry
+from errors import NotFoundError
 from models.commands import CreateItemCommand, SearchCommand
 from models.enums import LibraryItemType, SourceKind
 from views.telegram.item_view import render_item
@@ -106,7 +108,10 @@ async def get_related_items(arguments: SkillArguments, context: SkillContext) ->
         return "Связанные материалы не найдены."
     lines = []
     for relation in item.related:
-        target, _target_slug = await context.container.items.get(relation.target_id)
+        try:
+            target, _target_slug = await context.container.items.get(relation.target_id)
+        except NotFoundError:
+            continue
         lines.append(f"- {relation.type.value}: {target.title} ({target.id})")
     return "\n".join(lines)
 
@@ -115,20 +120,31 @@ async def list_recent_items(arguments: SkillArguments, context: SkillContext) ->
     requested_type = arguments.requested_type
     if requested_type:
         rows = await context.container.database.fetchall(
-            "SELECT id, type, title, slug FROM library_items WHERE type=? "
-            "ORDER BY created_at DESC LIMIT 10",
+            "SELECT id FROM library_items WHERE type=? "
+            "ORDER BY created_at DESC LIMIT 100",
             (requested_type,),
         )
     else:
         rows = await context.container.database.fetchall(
-            "SELECT id, type, title, slug FROM library_items ORDER BY created_at DESC LIMIT 10"
+            "SELECT id FROM library_items ORDER BY created_at DESC LIMIT 100"
         )
-    if not rows:
+    visible = []
+    for row in rows:
+        try:
+            item, _slug = await context.container.items.get(str(row["id"]))
+        except NotFoundError:
+            continue
+        visible.append(item)
+        if len(visible) == 10:
+            break
+    if not visible:
         return "Библиотека пока пуста."
-    return "\n".join(f"- {row['title']} [{row['type']}] ({row['id']})" for row in rows)
-
+    return "\n".join(
+        f"- {item.title} [{item.type.value}] ({item.id})" for item in visible
+    )
 
 async def list_schema_proposals(_arguments: SkillArguments, context: SkillContext) -> str:
+    await context.container.authorization.require_admin(current_authorization())
     proposals = await context.container.proposals.list()
     pending = [item for item in proposals if item["status"] == "pending"]
     if not pending:
