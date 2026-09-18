@@ -487,11 +487,14 @@ Authorization header и содержимое материалов.
 
 ## 15.1. Статус реализации
 
-Программные этапы 1–5 и документация реализованы. Автоматический backfill и
-принудительный rebuild GBrain выполняются при первом запуске новой версии.
-Операционные действия rollout — backup Railway volume, выпуск production-токенов
-и отключение compatibility tokens — намеренно остаются ручными и не отмечены как
-выполненные в репозитории.
+Программные этапы 1–5 и документация реализованы. Для backfill доступны команды
+`library-admin migration dry-run|apply|verify`. Содержательный backfill не
+выполняется автоматически: startup остаётся fail-closed, пока оператор не создаст
+backup и явно не запустит `apply --backup-confirmed`. После завершённого backfill
+новый Markdown без section помещается в закрытый `research/_quarantine`.
+Операционные действия rollout — backup Railway volume, выполнение production
+dry-run/backfill, выпуск production-токенов и отключение compatibility tokens —
+остаются ручными и выполняются по `docs/access-rollout-runbook.md`.
 
 ## 16. Проверки
 

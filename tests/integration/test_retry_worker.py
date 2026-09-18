@@ -5,6 +5,7 @@ import pytest
 from controllers.utils.bootstrap.dependencies import build_container
 from controllers.utils.bootstrap.settings import Settings
 from controllers.workers.retry_controller import RetryWorker
+from models.access import SectionRef
 from models.commands import CreateItemCommand
 from models.enums import LibraryItemType
 from tests.fakes import FakeGBrainAdapter
@@ -20,7 +21,10 @@ async def test_pending_index_job_is_completed(tmp_path: Path) -> None:
         saved = await container.items.create(
             CreateItemCommand(type=LibraryItemType.NOTE, title="Retry target")
         )
-        job_id = await container.items.jobs.create_pending_index(saved.item_id, "temporary")
+        section = await container.sections_store.require(SectionRef.parse("research/main"))
+        job_id = await container.items.jobs.create_pending_index(
+            saved.item_id, "temporary", section.id
+        )
 
         assert await RetryWorker(container).process_once() == 1
 

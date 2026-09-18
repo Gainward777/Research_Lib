@@ -28,7 +28,7 @@ class Attachment(BaseModel):
 
 class LibraryItem(BaseModel):
     id: str = Field(default_factory=new_library_item_id)
-    section: SectionRef = Field(default_factory=lambda: SectionRef.parse("research/main"))
+    section: SectionRef
     type: LibraryItemType
     title: str = Field(min_length=1, max_length=300)
     content: str = ""

@@ -1,5 +1,8 @@
 # Разделы и project-scoped токены
 
+Пошаговое включение в Railway для текущего production окружения описано в
+[`access-rollout-runbook.md`](access-rollout-runbook.md).
+
 ## Назначение
 
 Каждый материал Research Library принадлежит одному разделу:

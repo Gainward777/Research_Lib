@@ -101,6 +101,9 @@ async def build_container(
         repository = MarkdownItemRepository(
             settings.library_brain_root, database, sections_store
         )
+        # Never expose a partially classified catalog. A content-changing backfill
+        # must be applied explicitly through library-admin after a backup.
+        await repository.ensure_section_backfill_ready()
         await repository.rebuild_catalog()
         attachments = AttachmentStore(
             settings.library_attachments_root,

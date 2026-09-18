@@ -245,7 +245,7 @@ LOG_LEVEL=INFO</code></pre>
   --grant memento/backend:read,publish</code></pre></div>
         </div>
         <p>REST и MCP принимают один формат: <code>Authorization: Bearer rl_&lt;prefix&gt;_&lt;secret&gt;</code>. Недоступный item возвращается как 404. Search обращается только к разрешённым non-federated GBrain sources.</p>
-        <div class="note">Полный runbook выдачи, ротации, отзыва, legacy-перехода и backup: <a href="access-control.md">docs/access-control.md</a>.</div>
+        <div class="note">Модель доступа и ротация: <a href="access-control.md">docs/access-control.md</a>. Пошаговый production rollout Telegram, backup и backfill: <a href="access-rollout-runbook.md">docs/access-rollout-runbook.md</a>.</div>
       </section>
       <section id="telegram">
         <h2>Использование Telegram-бота</h2>

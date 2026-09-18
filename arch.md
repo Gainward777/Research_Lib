@@ -738,6 +738,8 @@ Stores находятся в `Controllers/utils/BD`, auth services — в
 `Controllers/utils/services/access`, hashing — в
 `Controllers/utils/infrastructure/security`. Полный runbook:
 [`docs/access-control.md`](docs/access-control.md).
+Порядок production-rollout, backup, dry-run и отключения compatibility tokens:
+[`docs/access-rollout-runbook.md`](docs/access-rollout-runbook.md).
 
 ### 14.2. Observability
 

@@ -47,7 +47,7 @@ class AttachmentStore:
         filename: str | None,
         content_type: str | None,
         *,
-        section_id: str = "sec_research_main",
+        section_id: str,
     ) -> dict[str, object]:
         if not content:
             raise ValueError("Empty upload")

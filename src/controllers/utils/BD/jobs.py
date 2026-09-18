@@ -10,7 +10,7 @@ class JobStore:
         self.database = database
 
     async def create_pending_index(
-        self, item_id: str, error: str, section_id: str = "sec_research_main"
+        self, item_id: str, error: str, section_id: str
     ) -> str:
         job_id = f"job_{uuid4().hex}"
         await self.database.execute(

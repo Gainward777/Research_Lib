@@ -6,6 +6,7 @@ from controllers.utils.bootstrap.dependencies import build_container
 from controllers.utils.bootstrap.settings import Settings
 from controllers.utils.infrastructure.observability.bootstrap import shutdown_observability
 from controllers.workers.retry_controller import RetryWorker
+from models.access import SectionRef
 from models.commands import CreateItemCommand
 from models.enums import LibraryItemType
 from tests.fakes import FakeGBrainAdapter
@@ -27,7 +28,10 @@ async def test_retry_worker_updates_outcome_and_pending_gauges(tmp_path: Path) -
         saved = await container.items.create(
             CreateItemCommand(type=LibraryItemType.NOTE, title="Retry metric target")
         )
-        await container.items.jobs.create_pending_index(saved.item_id, "temporary")
+        section = await container.sections_store.require(SectionRef.parse("research/main"))
+        await container.items.jobs.create_pending_index(
+            saved.item_id, "temporary", section.id
+        )
 
         assert await RetryWorker(container).process_once() == 1
 

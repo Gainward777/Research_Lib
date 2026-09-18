@@ -539,6 +539,8 @@ Research Library не запускается.
 [`docs/observability.md`](docs/observability.md).
 Разделы, выдача, ротация и отзыв токенов описаны в
 [`docs/access-control.md`](docs/access-control.md).
+Production-переход Telegram-бота на индивидуальный токен выполняется по
+[`docs/access-rollout-runbook.md`](docs/access-rollout-runbook.md).
 
 ## 11. SQLite operational schema
 

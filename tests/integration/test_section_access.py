@@ -4,7 +4,7 @@ import pytest
 
 from controllers.utils.bootstrap.dependencies import build_container
 from controllers.utils.bootstrap.settings import Settings
-from errors import NotFoundError
+from errors import NotFoundError, PermissionDeniedError
 from models.access import (
     AccessPermission,
     SectionReadPolicy,
@@ -99,6 +99,41 @@ async def test_project_sections_isolate_get_search_uploads_and_idempotency(
         )
         assert [hit.item_id for hit in hits] == [backend_result.item_id]
 
+        answer = await container.search.ask(
+            SearchCommand(query="Shared marker"),
+            auth=backend_context,
+        )
+        assert [source.item_id for source in answer.sources] == [backend_result.item_id]
+
+        research = SectionRef.parse("research/main")
+        autoresearch = await container.token_service.create(
+            root_context,
+            name="autoresearch",
+            subject_type=SubjectType.SERVICE,
+            grants=[(research, AccessPermission.PUBLISH)],
+        )
+        autoresearch_context = await container.authorization.authenticate(
+            autoresearch.token, legacy_surface="api"
+        )
+        research_result = await container.items.create(
+            CreateItemCommand(
+                section=research,
+                type=LibraryItemType.EXPERIMENT_REPORT,
+                title="AutoResearch report",
+            ),
+            auth=autoresearch_context,
+        )
+        assert research_result.created
+        with pytest.raises(PermissionDeniedError):
+            await container.items.create(
+                CreateItemCommand(
+                    section=backend,
+                    type=LibraryItemType.DEVELOPMENT_CONTEXT,
+                    title="AutoResearch cannot publish Memento",
+                ),
+                auth=autoresearch_context,
+            )
+
         mobile_section = await container.sections_store.require(mobile)
         upload = await container.attachments.save_upload(
             b"plain attachment",
@@ -118,6 +153,49 @@ async def test_project_sections_isolate_get_search_uploads_and_idempotency(
             )
     finally:
         await container.close()
+
+
+@pytest.mark.asyncio
+async def test_grants_survive_restart(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        library_data_root=tmp_path / "library",
+        library_auth_enabled=True,
+        library_token_pepper="restart-test-pepper",
+    )
+    first = await build_container(settings, gbrain_factory=FakeGBrainAdapter)
+    try:
+        assert first.token_service is not None
+        root = await first.token_service.bootstrap_system_admin(name="root")
+        root_context = await first.authorization.authenticate(
+            root.token, legacy_surface="api"
+        )
+        backend = SectionRef.parse("memento/backend")
+        await first.section_service.create(
+            root_context,
+            backend,
+            title="Backend",
+            read_policy=SectionReadPolicy.RESTRICTED,
+        )
+        developer = await first.token_service.create(
+            root_context,
+            name="backend-reader",
+            subject_type=SubjectType.DEVELOPER,
+            grants=[(backend, AccessPermission.READ)],
+        )
+    finally:
+        await first.close()
+
+    second = await build_container(settings, gbrain_factory=FakeGBrainAdapter)
+    try:
+        restored = await second.authorization.authenticate(
+            developer.token, legacy_surface="api"
+        )
+        assert second.authorization.has_permission(
+            restored, backend, AccessPermission.READ
+        )
+    finally:
+        await second.close()
 
 
 @pytest.mark.asyncio

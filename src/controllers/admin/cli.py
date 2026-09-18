@@ -1,9 +1,11 @@
 import argparse
 import asyncio
 import json
+import os
 from dataclasses import dataclass
 
 from controllers.utils.BD.access import AccessStore
+from controllers.utils.BD.markdown import MarkdownItemRepository
 from controllers.utils.BD.migrations import apply_migrations
 from controllers.utils.BD.sections import SectionStore
 from controllers.utils.BD.sqlite import Database
@@ -24,6 +26,7 @@ from models.access import (
 @dataclass
 class AdminRuntime:
     database: Database
+    repository: MarkdownItemRepository
     authorization: AuthorizationService
     sections: SectionService
     tokens: TokenService
@@ -52,8 +55,12 @@ async def _runtime() -> AdminRuntime:
     sections_store = SectionStore(database)
     hasher = TokenHasher(pepper)
     authorization = AuthorizationService(settings, access, sections_store, hasher)
+    repository = MarkdownItemRepository(
+        settings.library_brain_root, database, sections_store
+    )
     return AdminRuntime(
         database=database,
+        repository=repository,
         authorization=authorization,
         sections=SectionService(sections_store, access, authorization),
         tokens=TokenService(access, sections_store, hasher, authorization),
@@ -70,7 +77,11 @@ async def _context(runtime: AdminRuntime, token: str | None) -> AuthorizationCon
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="library-admin")
-    parser.add_argument("--token", help="administrator bearer token")
+    parser.add_argument(
+        "--token",
+        default=os.environ.get("LIBRARY_ADMIN_TOKEN"),
+        help="administrator bearer token (or use session-only LIBRARY_ADMIN_TOKEN)",
+    )
     groups = parser.add_subparsers(dest="group", required=True)
 
     sections = groups.add_parser("sections").add_subparsers(dest="action", required=True)
@@ -113,6 +124,18 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("token_id")
         command.add_argument("section")
         command.add_argument("permission", choices=["read", "publish", "admin"])
+
+    migration = groups.add_parser("migration").add_subparsers(
+        dest="action", required=True
+    )
+    migration.add_parser("dry-run")
+    apply_backfill = migration.add_parser("apply")
+    apply_backfill.add_argument(
+        "--backup-confirmed",
+        action="store_true",
+        help="confirm that the Railway volume and SQLite database were backed up",
+    )
+    migration.add_parser("verify")
     return parser
 
 
@@ -120,6 +143,19 @@ async def _run(args: argparse.Namespace) -> object:
     runtime = await _runtime()
     try:
         context = await _context(runtime, args.token)
+        if args.group == "migration":
+            if args.action == "dry-run":
+                return await runtime.repository.backfill_sections(apply=False)
+            if args.action == "apply":
+                if not args.backup_confirmed:
+                    raise RuntimeError(
+                        "Refusing section backfill without --backup-confirmed"
+                    )
+                result = await runtime.repository.backfill_sections(apply=True)
+                verification = await runtime.repository.verify_section_integrity()
+                return {"backfill": result, "verification": verification}
+            return await runtime.repository.verify_section_integrity()
+
         if args.group == "sections":
             if args.action == "list":
                 return [
@@ -206,6 +242,13 @@ def main() -> None:
     args = _parser().parse_args()
     result = asyncio.run(_run(args))
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    if isinstance(result, dict):
+        verification = result.get("verification")
+        failed = result.get("ok") is False or (
+            isinstance(verification, dict) and verification.get("ok") is False
+        )
+        if failed:
+            raise SystemExit(2)
 
 
 if __name__ == "__main__":

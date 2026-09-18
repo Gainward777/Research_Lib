@@ -134,12 +134,19 @@ async def test_public_authenticated_and_restricted_policies(access_runtime) -> N
     root = await tokens.bootstrap_system_admin(name="root")
     root_context = await authorization.authenticate(root.token, legacy_surface="api")
     public = SectionRef.parse("research/public")
+    authenticated = SectionRef.parse("research/team")
     restricted = SectionRef.parse("research/private")
     await section_service.create(
         root_context,
         public,
         title="Public",
         read_policy=SectionReadPolicy.PUBLIC,
+    )
+    await section_service.create(
+        root_context,
+        authenticated,
+        title="Team",
+        read_policy=SectionReadPolicy.AUTHENTICATED,
     )
     await section_service.create(
         root_context,
@@ -150,6 +157,8 @@ async def test_public_authenticated_and_restricted_policies(access_runtime) -> N
     anonymous = authorization.anonymous_context()
 
     assert not await authorization.can_read(anonymous, public)
+    assert not await authorization.can_read(anonymous, authenticated)
+    assert await authorization.can_read(root_context, authenticated)
     settings.library_public_sections_enabled = True
     assert await authorization.can_read(anonymous, public)
     assert not await authorization.can_read(anonymous, restricted)
@@ -167,3 +176,23 @@ def test_legacy_grants_parser_is_explicit() -> None:
         ("research/main", "read"),
     ]
     assert parse_legacy_grants("") == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_token_loses_access_when_compatibility_secret_is_removed(
+    access_runtime,
+) -> None:
+    settings, _database, _access, _sections, authorization, _section_service, _tokens = (
+        access_runtime
+    )
+    settings.library_api_token = "legacy-secret"
+    settings.library_legacy_api_grants = "research/main:read"
+
+    legacy = await authorization.authenticate("legacy-secret", legacy_surface="api")
+    assert legacy.authenticated
+    assert legacy.legacy
+
+    settings.library_api_token = ""
+    removed = await authorization.authenticate("legacy-secret", legacy_surface="api")
+    assert removed.invalid_token
+    assert not removed.authenticated

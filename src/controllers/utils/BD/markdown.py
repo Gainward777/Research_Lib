@@ -1,8 +1,9 @@
+import json
 import re
 import unicodedata
 from datetime import UTC
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -26,6 +27,9 @@ TYPE_DIRECTORIES: dict[LibraryItemType, str] = {
     LibraryItemType.NOTE: "inbox",
     LibraryItemType.DEVELOPMENT_CONTEXT: "memento",
 }
+
+QUARANTINE_SECTION = SectionRef.parse("research/_quarantine")
+MissingSectionMode = Literal["legacy", "quarantine"]
 
 
 def slugify(value: str) -> str:
@@ -99,12 +103,15 @@ class MarkdownItemRepository:
 
         for path in self.iter_pages():
             raw = path.read_text(encoding="utf-8")
+            frontmatter = self._frontmatter(raw)
+            missing_section = "section" not in frontmatter
+            original_tags = {str(tag) for tag in frontmatter.get("tags") or []}
             item = self.parse(raw)
             relative_path = path.relative_to(self.brain_root)
             slug = relative_path.with_suffix("").as_posix()
             if item.id == item_id_or_slug or slug == item_id_or_slug:
                 await self._register(item, relative_path, slug)
-                if "section:" not in raw.split("---", 2)[1]:
+                if missing_section or item.section.tag not in original_tags:
                     atomic_write_text(path, self.render(item))
                 return item, slug
         return None
@@ -122,15 +129,253 @@ class MarkdownItemRepository:
         count = 0
         for path in self.iter_pages():
             raw = path.read_text(encoding="utf-8")
+            frontmatter = self._frontmatter(raw)
+            missing_section = "section" not in frontmatter
+            original_tags = {str(tag) for tag in frontmatter.get("tags") or []}
             item = self.parse(raw)
             if item.section.tag not in item.tags:
                 item.tags.append(item.section.tag)
             relative_path = path.relative_to(self.brain_root)
             await self._register(item, relative_path, relative_path.with_suffix("").as_posix())
-            if "section:" not in raw.split("---", 2)[1]:
+            if missing_section or item.section.tag not in original_tags:
                 atomic_write_text(path, self.render(item))
             count += 1
         return count
+
+    async def backfill_sections(self, *, apply: bool) -> dict[str, Any]:
+        state = await self.database.fetchone(
+            "SELECT status FROM section_backfill_state WHERE id=1"
+        )
+        state_status = str(state["status"]) if state is not None else "pending"
+        mode: MissingSectionMode = (
+            "legacy" if state_status != "completed" else "quarantine"
+        )
+        candidates: list[dict[str, str]] = []
+        errors: list[dict[str, str]] = []
+        scanned = 0
+        for path in self.iter_pages():
+            scanned += 1
+            relative_path = path.relative_to(self.brain_root).as_posix()
+            try:
+                data = self._frontmatter(path.read_text(encoding="utf-8"))
+                if "section" in data:
+                    continue
+                target = (
+                    self._legacy_section(data)
+                    if mode == "legacy"
+                    else QUARANTINE_SECTION
+                )
+                candidates.append(
+                    {
+                        "path": relative_path,
+                        "type": str(data.get("type") or "unknown"),
+                        "target_section": target.value,
+                    }
+                )
+            except Exception as exc:
+                errors.append({"path": relative_path, "error": type(exc).__name__})
+
+        targets: dict[str, int] = {}
+        for candidate in candidates:
+            target = candidate["target_section"]
+            targets[target] = targets.get(target, 0) + 1
+        report: dict[str, Any] = {
+            "ok": not errors,
+            "status": state_status,
+            "mode": mode,
+            "scanned": scanned,
+            "missing_section": len(candidates),
+            "targets": targets,
+            "candidates": candidates,
+            "errors": errors,
+            "applied": False,
+        }
+        if not apply:
+            return report
+        if errors:
+            raise ValueError("Section backfill dry-run found unreadable Markdown files")
+        if state_status == "completed":
+            report["already_completed"] = True
+            return report
+
+        encoded_running = json.dumps(report, ensure_ascii=False, sort_keys=True)
+        await self.database.execute(
+            "UPDATE section_backfill_state SET status='running', report_json=?, "
+            "started_at=COALESCE(started_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP "
+            "WHERE id=1",
+            (encoded_running,),
+        )
+        try:
+            for candidate in candidates:
+                path = self.brain_root / candidate["path"]
+                item = self.parse(
+                    path.read_text(encoding="utf-8"), missing_section="legacy"
+                )
+                if item.section.tag not in item.tags:
+                    item.tags.append(item.section.tag)
+                relative_path = path.relative_to(self.brain_root)
+                await self._register(
+                    item, relative_path, relative_path.with_suffix("").as_posix()
+                )
+                atomic_write_text(path, self.render(item))
+            report["status"] = "completed"
+            report["applied"] = True
+            encoded = json.dumps(report, ensure_ascii=False, sort_keys=True)
+            await self.database.execute(
+                "UPDATE section_backfill_state SET status='completed', report_json=?, "
+                "completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=1",
+                (encoded,),
+            )
+            return report
+        except Exception:
+            report["status"] = "failed"
+            encoded = json.dumps(report, ensure_ascii=False, sort_keys=True)
+            await self.database.execute(
+                "UPDATE section_backfill_state SET status='failed', report_json=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=1",
+                (encoded,),
+            )
+            raise
+
+    async def ensure_section_backfill_ready(self) -> None:
+        report = await self.backfill_sections(apply=False)
+        if report["errors"]:
+            raise RuntimeError(
+                "Section backfill preflight failed; run library-admin migration dry-run"
+            )
+        if report["status"] == "completed":
+            return
+        if report["missing_section"]:
+            raise RuntimeError(
+                "Section backfill is required; create a backup, then run "
+                "library-admin migration apply before starting the service"
+            )
+        report["status"] = "completed"
+        report["applied"] = True
+        report["empty_backfill"] = True
+        encoded = json.dumps(report, ensure_ascii=False, sort_keys=True)
+        await self.database.execute(
+            "UPDATE section_backfill_state SET status='completed', report_json=?, "
+            "started_at=COALESCE(started_at, CURRENT_TIMESTAMP), "
+            "completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=1",
+            (encoded,),
+        )
+
+    async def verify_section_integrity(self) -> dict[str, Any]:
+        failures: list[str] = []
+        warnings: list[str] = []
+        state = await self.database.fetchone(
+            "SELECT status FROM section_backfill_state WHERE id=1"
+        )
+        state_status = str(state["status"]) if state is not None else "missing"
+        if state_status != "completed":
+            failures.append(f"section backfill state is {state_status}")
+
+        markdown_missing_section = 0
+        markdown_missing_tag = 0
+        markdown_errors = 0
+        for path in self.iter_pages():
+            try:
+                raw = path.read_text(encoding="utf-8")
+                data = self._frontmatter(raw)
+                if "section" not in data:
+                    markdown_missing_section += 1
+                    continue
+                item = self.parse(raw)
+                if item.section.tag not in {str(tag) for tag in data.get("tags") or []}:
+                    markdown_missing_tag += 1
+            except Exception:
+                markdown_errors += 1
+        if markdown_missing_section:
+            failures.append(f"{markdown_missing_section} Markdown files have no section")
+        if markdown_missing_tag:
+            failures.append(f"{markdown_missing_tag} Markdown files have no section tag")
+        if markdown_errors:
+            failures.append(f"{markdown_errors} Markdown files cannot be parsed")
+
+        null_counts: dict[str, int] = {}
+        for table in ("library_items", "uploads", "ingest_jobs", "idempotency_receipts"):
+            row = await self.database.fetchone(
+                f"SELECT COUNT(*) AS count FROM {table} WHERE section_id IS NULL"
+            )
+            count = int(row["count"]) if row is not None else 0
+            null_counts[table] = count
+            if count:
+                failures.append(f"{table} contains {count} rows without section")
+
+        development_outside_memento = await self.database.fetchone(
+            "SELECT COUNT(*) AS count FROM library_items i "
+            "JOIN library_sections s ON s.id=i.section_id "
+            "WHERE i.type='development-context' AND s.domain<>'memento'"
+        )
+        wrong_development_count = (
+            int(development_outside_memento["count"])
+            if development_outside_memento is not None
+            else 0
+        )
+        if wrong_development_count:
+            failures.append(
+                f"{wrong_development_count} development-context items are outside Memento"
+            )
+
+        job_mismatches = await self.database.fetchone(
+            "SELECT COUNT(*) AS count FROM ingest_jobs j "
+            "JOIN library_items i ON i.id=j.item_id "
+            "WHERE j.section_id<>i.section_id"
+        )
+        receipt_mismatches = await self.database.fetchone(
+            "SELECT COUNT(*) AS count FROM idempotency_receipts r "
+            "JOIN library_items i ON i.id=json_extract(r.response_json, '$.item_id') "
+            "WHERE r.section_id<>i.section_id"
+        )
+        dependent_mismatches = {
+            "ingest_jobs": int(job_mismatches["count"]) if job_mismatches else 0,
+            "idempotency_receipts": (
+                int(receipt_mismatches["count"]) if receipt_mismatches else 0
+            ),
+            "uploads": 0,
+        }
+        for path in self.iter_pages():
+            try:
+                item = self.parse(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            section = await self.sections.get_by_ref(item.section)
+            if section is None:
+                dependent_mismatches["uploads"] += len(item.attachments)
+                continue
+            for attachment in item.attachments:
+                upload = await self.database.fetchone(
+                    "SELECT section_id FROM uploads WHERE id=?", (attachment.id,)
+                )
+                if upload is None or str(upload["section_id"]) != section.id:
+                    dependent_mismatches["uploads"] += 1
+        for name, count in dependent_mismatches.items():
+            if count:
+                failures.append(f"{name} contains {count} cross-section references")
+
+        quarantined = await self.database.fetchone(
+            "SELECT COUNT(*) AS count FROM library_items i "
+            "JOIN library_sections s ON s.id=i.section_id "
+            "WHERE s.domain='research' AND s.key='_quarantine'"
+        )
+        quarantined_count = int(quarantined["count"]) if quarantined is not None else 0
+        if quarantined_count:
+            warnings.append(f"{quarantined_count} items require quarantine review")
+
+        return {
+            "ok": not failures,
+            "backfill_status": state_status,
+            "markdown_missing_section": markdown_missing_section,
+            "markdown_missing_tag": markdown_missing_tag,
+            "markdown_errors": markdown_errors,
+            "null_section_rows": null_counts,
+            "development_context_outside_memento": wrong_development_count,
+            "dependent_section_mismatches": dependent_mismatches,
+            "quarantined_items": quarantined_count,
+            "failures": failures,
+            "warnings": warnings,
+        }
 
     async def _register(self, item: LibraryItem, relative_path: Path, slug: str) -> None:
         section = await self.sections.ensure(item.section)
@@ -197,26 +442,45 @@ class MarkdownItemRepository:
         return "\n\n".join(sections).rstrip() + "\n"
 
     @staticmethod
-    def parse(content: str) -> LibraryItem:
+    def _frontmatter(content: str) -> dict[str, Any]:
+        if not content.startswith("---\n"):
+            raise ValueError("Markdown page has no YAML frontmatter")
+        _, raw_frontmatter, _body = content.split("---", 2)
+        data: dict[str, Any] = yaml.safe_load(raw_frontmatter) or {}
+        if not isinstance(data, dict):
+            raise ValueError("Markdown YAML frontmatter must be an object")
+        return data
+
+    @staticmethod
+    def _legacy_section(data: dict[str, Any]) -> SectionRef:
+        if data.get("type") == LibraryItemType.DEVELOPMENT_CONTEXT.value:
+            project = str((data.get("metadata") or {}).get("project") or "_unassigned")
+            try:
+                return SectionRef(domain=SectionDomain.MEMENTO, key=project)
+            except ValueError:
+                return SectionRef.parse("memento/_unassigned")
+        return SectionRef.parse("research/main")
+
+    @classmethod
+    def parse(
+        cls,
+        content: str,
+        *,
+        missing_section: MissingSectionMode = "quarantine",
+    ) -> LibraryItem:
         if not content.startswith("---\n"):
             raise ValueError("Markdown page has no YAML frontmatter")
         _, raw_frontmatter, body = content.split("---", 2)
         data: dict[str, Any] = yaml.safe_load(raw_frontmatter) or {}
+        if not isinstance(data, dict):
+            raise ValueError("Markdown YAML frontmatter must be an object")
         if "section" not in data:
-            if data.get("type") == LibraryItemType.DEVELOPMENT_CONTEXT.value:
-                project = str((data.get("metadata") or {}).get("project") or "_unassigned")
-                try:
-                    data["section"] = SectionRef(
-                        domain=SectionDomain.MEMENTO, key=project
-                    ).model_dump(mode="json")
-                except ValueError:
-                    data["section"] = SectionRef.parse(
-                        "memento/_unassigned"
-                    ).model_dump(mode="json")
-            else:
-                data["section"] = SectionRef.parse(
-                    "research/main"
-                ).model_dump(mode="json")
+            section = (
+                cls._legacy_section(data)
+                if missing_section == "legacy"
+                else QUARANTINE_SECTION
+            )
+            data["section"] = section.model_dump(mode="json")
         summary = ""
         main_content = ""
         if "## Резюме" in body:
