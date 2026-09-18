@@ -208,6 +208,14 @@ async def test_readiness_opens_gbrain_stats(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_readiness_accepts_successful_non_object_stats_payload(tmp_path: Path) -> None:
+    adapter = GBrainAdapter(SimpleNamespace(), home=tmp_path)
+    adapter._run_call = AsyncMock(return_value=[{"page_count": 0}])
+
+    assert await adapter.health() is True
+
+
+@pytest.mark.asyncio
 async def test_think_returns_synthesized_answer_with_library_sources(tmp_path: Path) -> None:
     item = LibraryItem(
         type=LibraryItemType.IDEA,

@@ -125,10 +125,13 @@ class GBrainAdapter:
     async def health(self) -> bool:
         """Cheap readiness probe that opens PGLite and reads its statistics."""
         try:
-            result = await self._run_call("get_stats", {})
+            await self._run_call("get_stats", {})
         except Exception:
             return False
-        return isinstance(self._unwrap(result), dict)
+        # GBrain changed the successful get_stats result envelope between pinned
+        # releases. _run_call already rejects process failures and invalid JSON,
+        # so a completed call is the stable readiness contract.
+        return True
 
     async def _doctor_health(self) -> bool:
         """Full startup diagnostic, limited to checks that block library storage."""
