@@ -32,6 +32,12 @@ class AdminRuntime:
     tokens: TokenService
 
 
+@dataclass
+class MigrationRuntime:
+    database: Database
+    repository: MarkdownItemRepository
+
+
 def _grant(value: str) -> list[tuple[SectionRef | None, AccessPermission]]:
     if value == AccessPermission.SYSTEM_ADMIN.value:
         return [(None, AccessPermission.SYSTEM_ADMIN)]
@@ -64,6 +70,21 @@ async def _runtime() -> AdminRuntime:
         authorization=authorization,
         sections=SectionService(sections_store, access, authorization),
         tokens=TokenService(access, sections_store, hasher, authorization),
+    )
+
+
+async def _migration_runtime() -> MigrationRuntime:
+    settings = Settings()
+    settings.ensure_directories()
+    database = Database(settings.library_sqlite_path)
+    await database.connect()
+    await apply_migrations(database)
+    sections_store = SectionStore(database)
+    return MigrationRuntime(
+        database=database,
+        repository=MarkdownItemRepository(
+            settings.library_brain_root, database, sections_store
+        ),
     )
 
 
@@ -140,10 +161,9 @@ def _parser() -> argparse.ArgumentParser:
 
 
 async def _run(args: argparse.Namespace) -> object:
-    runtime = await _runtime()
-    try:
-        context = await _context(runtime, args.token)
-        if args.group == "migration":
+    if args.group == "migration":
+        runtime = await _migration_runtime()
+        try:
             if args.action == "dry-run":
                 return await runtime.repository.backfill_sections(apply=False)
             if args.action == "apply":
@@ -155,7 +175,12 @@ async def _run(args: argparse.Namespace) -> object:
                 verification = await runtime.repository.verify_section_integrity()
                 return {"backfill": result, "verification": verification}
             return await runtime.repository.verify_section_integrity()
+        finally:
+            await runtime.database.close()
 
+    runtime = await _runtime()
+    try:
+        context = await _context(runtime, args.token)
         if args.group == "sections":
             if args.action == "list":
                 return [

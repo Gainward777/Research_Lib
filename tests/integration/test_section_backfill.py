@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from controllers.admin.cli import _parser, _run
 from controllers.utils.BD.markdown import MarkdownItemRepository
 from controllers.utils.BD.migrations import apply_migrations
 from controllers.utils.BD.sections import SectionStore
@@ -34,6 +35,20 @@ tags: []
 
 # Unclassified note
 """
+
+
+@pytest.mark.asyncio
+async def test_migration_cli_does_not_require_token_pepper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LIBRARY_DATA_ROOT", str(tmp_path / "library"))
+    monkeypatch.delenv("LIBRARY_TOKEN_PEPPER", raising=False)
+
+    result = await _run(_parser().parse_args(["migration", "dry-run"]))
+
+    assert result["ok"] is True
+    assert result["missing_section"] == 0
 
 
 @pytest.mark.asyncio
