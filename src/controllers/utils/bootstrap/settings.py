@@ -128,6 +128,20 @@ class Settings(BaseSettings):
                 raise ValueError("OTEL_EXPORTER_OTLP_ENDPOINT is required when metrics are enabled")
         if self.metrics_endpoint_enabled and not self.metrics_auth_token.get_secret_value():
             raise ValueError("METRICS_AUTH_TOKEN is required when metrics endpoint is enabled")
+        metrics_token = self.metrics_auth_token.get_secret_value()
+        reserved_tokens = {
+            value
+            for value in (
+                self.library_api_token,
+                self.mcp_auth_token,
+                self.library_telegram_access_token.get_secret_value(),
+            )
+            if value
+        }
+        if metrics_token and metrics_token in reserved_tokens:
+            raise ValueError(
+                "METRICS_AUTH_TOKEN must differ from API, MCP, and Telegram tokens"
+            )
         if self.library_auth_enabled and not self.library_token_pepper.get_secret_value():
             raise ValueError("LIBRARY_TOKEN_PEPPER is required when project auth is enabled")
         if self.library_auth_enabled and not self.library_auth_fail_closed:

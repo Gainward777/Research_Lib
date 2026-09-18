@@ -75,20 +75,22 @@ Bearer-токен в лог не записывается. Для диагнос
 Versioned assets находятся в `deploy/grafana/`:
 
 - `research-library.dashboard.json` — Memento, GBrain, MCP, retry и retrieval;
-- `alerts.yaml` — error ratio, latency, GBrain timeout и pending-index age;
+- `alerts.yaml` — error ratio, latency, GBrain timeout, pending-index age,
+  readiness, retrieval baseline и отсутствие OTLP heartbeat;
 - `README.md` — порядок импорта и внешние ограничения.
 
 Contact points и credentials создаются в Grafana Cloud и Railway, но не
-коммитятся. Проверку `/readyz` настройте внешним HTTP probe через Grafana
-Synthetic Monitoring.
+коммитятся. Railway должен регулярно опрашивать `/readyz`; внешний HTTP probe
+через Grafana Synthetic Monitoring остаётся рекомендуемой независимой проверкой.
 
 ## Отказоустойчивость
 
 Запись метрик обёрнута fail-safe recorder: исключение observability backend не
-прерывает REST, MCP, Telegram или retry worker. OTLP export выполняется
-периодически, с ограниченным batch size и timeout. При недоступности Grafana
-основные операции продолжают работать; подробности exporter видны в Railway
-logs.
+прерывает REST, MCP, Telegram или retry worker. SDK хранит агрегаты, а не очередь
+отдельных событий; cardinality ограничена фиксированными labels. OTLP export
+выполняется отдельным periodic reader с ограниченным batch size и timeout. При
+недоступности Grafana основные операции продолжают работать; отсутствие
+heartbeat видно в Grafana, а подробности exporter — в Railway logs.
 
 ## Проверка перед production
 

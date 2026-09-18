@@ -143,6 +143,10 @@ async def test_migration_creates_access_schema_and_required_section_columns(
             "token_grants",
             "auth_audit_events",
         }.issubset(tables)
+        research_main = await container.sections_store.require(
+            SectionRef.parse("research/main")
+        )
+        assert research_main.read_policy == SectionReadPolicy.RESTRICTED
         for table in ("library_items", "uploads", "ingest_jobs"):
             columns = {
                 str(row["name"])

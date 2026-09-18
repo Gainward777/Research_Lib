@@ -291,6 +291,7 @@ LOG_LEVEL=INFO</code></pre>
           <tbody>
             <tr><td><code>GET /healthz</code>, <code>GET /readyz</code></td><td>Живость процесса и готовность зависимостей</td></tr>
             <tr><td><code>POST /v1/uploads</code></td><td>Загрузить файл до 25 МБ; возвращает <code>upload_id</code></td></tr>
+            <tr><td><code>GET /v1/attachments/{attachment_id}</code></td><td>Скачать вложение после проверки read-доступа к его section</td></tr>
             <tr><td><code>POST /v1/items</code></td><td>Создать типизированный материал</td></tr>
             <tr><td><code>GET /v1/items/{item_id}</code></td><td>Получить материал по ID или slug</td></tr>
             <tr><td><code>POST /v1/items/{item_id}/relations</code></td><td>Добавить явную связь</td></tr>

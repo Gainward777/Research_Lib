@@ -19,7 +19,10 @@ from controllers.utils.infrastructure.observability.metrics import (
     PrometheusMetricsRecorder,
 )
 from errors import SearchBackendError
+from models.access import SectionRef
 from models.commands import SearchCommand
+
+TEST_SECTION = SectionRef.parse("research/main")
 
 
 def test_prometheus_metrics_use_bounded_labels_and_hide_content() -> None:
@@ -43,6 +46,7 @@ def test_prometheus_metrics_use_bounded_labels_and_hide_content() -> None:
         supersedes=True,
         consulted_sources=2,
     )
+    recorder.set_readiness(ready=False)
 
     rendered = recorder.render().decode("utf-8")
 
@@ -53,6 +57,11 @@ def test_prometheus_metrics_use_bounded_labels_and_hide_content() -> None:
     assert "user supplied project" not in rendered
     assert "query" not in rendered
     assert "content" not in rendered
+    assert 'library_readiness{environment="test",service="research-library"} 0.0' in rendered
+    assert (
+        'library_observability_heartbeat{environment="test",service="research-library"} 1.0'
+        in rendered
+    )
 
 
 def test_access_metrics_use_bounded_labels_without_principal_ids() -> None:
@@ -133,6 +142,20 @@ def test_metrics_configuration_requires_separate_secrets() -> None:
     with pytest.raises(ValidationError, match="OTEL_METRICS_EXPORTER=otlp"):
         Settings(_env_file=None, metrics_enabled=True)
 
+    with pytest.raises(ValidationError, match="must differ"):
+        Settings(
+            _env_file=None,
+            library_api_token="shared-secret",
+            metrics_auth_token="shared-secret",
+        )
+
+    with pytest.raises(ValidationError, match="must differ"):
+        Settings(
+            _env_file=None,
+            library_telegram_access_token="shared-secret",
+            metrics_auth_token="shared-secret",
+        )
+
 
 @pytest.mark.asyncio
 async def test_gbrain_search_records_outcome_and_latency(tmp_path: Path) -> None:
@@ -146,9 +169,12 @@ async def test_gbrain_search_records_outcome_and_latency(tmp_path: Path) -> None
         home=tmp_path,
         metrics=recorder,
     )
+    adapter._ensure_source = AsyncMock()
     adapter._run_call = AsyncMock(return_value=[])
 
-    assert await adapter.search(SearchCommand(query="safe test query")) == []
+    assert await adapter.search(
+        SearchCommand(query="safe test query", sections=[TEST_SECTION])
+    ) == []
 
     rendered = recorder.render().decode("utf-8")
     assert "gbrain_operation_requests_total" in rendered
@@ -169,12 +195,15 @@ async def test_gbrain_timeout_is_measured_without_query_content(tmp_path: Path) 
         home=tmp_path,
         metrics=recorder,
     )
+    adapter._ensure_source = AsyncMock()
     adapter._run_call = AsyncMock(
         side_effect=SearchBackendError("GBrain command timed out after 1 second")
     )
 
     with pytest.raises(SearchBackendError, match="timed out"):
-        await adapter.search(SearchCommand(query="private timeout query"))
+        await adapter.search(
+            SearchCommand(query="private timeout query", sections=[TEST_SECTION])
+        )
 
     rendered = recorder.render().decode("utf-8")
     assert 'outcome="timeout"' in rendered

@@ -103,6 +103,9 @@ async def test_permission_inheritance_expiration_and_revoke(access_runtime) -> N
     )
     await authorization.require_read(developer_context, backend)
     await authorization.require_publish(developer_context, backend)
+    assert not await authorization.can_read(
+        developer_context, SectionRef.parse("research/main")
+    )
     with pytest.raises(PermissionDeniedError):
         await authorization.require_admin(developer_context, backend)
 

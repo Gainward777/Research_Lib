@@ -4,6 +4,7 @@ from time import perf_counter
 from controllers.utils.infrastructure.observability.context import set_request_scope
 from controllers.utils.infrastructure.observability.logging import log_event
 from controllers.utils.infrastructure.observability.metrics import MetricsRecorder
+from controllers.utils.services.access.context import current_authorization
 from controllers.utils.services.librarian.search_service import SearchService
 from controllers.utils.services.library.item_service import ItemService
 from controllers.utils.services.library.memento_service import (
@@ -11,7 +12,7 @@ from controllers.utils.services.library.memento_service import (
     MementoService,
 )
 from errors import IdempotencyConflictError, SearchBackendError
-from models.access import AuthorizationContext
+from models.access import AuthorizationContext, SectionDomain
 from models.memento import (
     DevelopmentContextBundle,
     DevelopmentContextQuery,
@@ -39,6 +40,14 @@ class ObservableMementoService(MementoService):
         idempotency_key: str,
         auth: AuthorizationContext | None = None,
     ) -> SaveResult:
+        authorization = auth or current_authorization()
+        if not context.project:
+            section = await self.items.authorization.resolve_publish_section(
+                authorization,
+                None,
+                domain=SectionDomain.MEMENTO,
+            )
+            context = context.model_copy(update={"project": section.key})
         set_request_scope(
             project=context.project,
             repository=context.repository,
@@ -49,7 +58,7 @@ class ObservableMementoService(MementoService):
         result: SaveResult | None = None
         try:
             result = await super().publish(
-                context, idempotency_key=idempotency_key, auth=auth
+                context, idempotency_key=idempotency_key, auth=authorization
             )
             outcome = (
                 "deduplicated"

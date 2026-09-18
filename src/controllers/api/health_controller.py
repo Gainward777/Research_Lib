@@ -20,4 +20,6 @@ async def readiness(
     volume_ok = container.settings.library_data_root.exists()
     gbrain_ok = await container.gbrain.health()
     checks = {"sqlite": sqlite_ok, "volume": volume_ok, "gbrain": gbrain_ok}
-    return HealthResponse(status="ok" if all(checks.values()) else "not_ready", checks=checks)
+    ready = all(checks.values())
+    container.observability.recorder.set_readiness(ready=ready)
+    return HealthResponse(status="ok" if ready else "not_ready", checks=checks)

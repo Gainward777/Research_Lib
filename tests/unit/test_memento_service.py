@@ -5,6 +5,12 @@ from pydantic import ValidationError
 
 from controllers.utils.bootstrap.dependencies import build_container
 from controllers.utils.bootstrap.settings import Settings
+from models.access import (
+    AccessPermission,
+    SectionReadPolicy,
+    SectionRef,
+    SubjectType,
+)
 from models.enums import LibraryItemType, RelationType
 from models.memento import (
     DevelopmentContextKind,
@@ -155,3 +161,53 @@ def test_publish_context_requires_work_identifier() -> None:
             title="Missing work scope",
             content="This record cannot be resumed safely.",
         )
+
+
+@pytest.mark.asyncio
+async def test_publish_infers_single_memento_section_from_token(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        library_data_root=tmp_path / "library",
+        library_auth_enabled=True,
+        library_token_pepper="memento-test-pepper",
+    )
+    container = await build_container(settings, gbrain_factory=FakeGBrainAdapter)
+    try:
+        assert container.token_service is not None
+        root = await container.token_service.bootstrap_system_admin(name="root")
+        root_context = await container.authorization.authenticate(
+            root.token, legacy_surface="api"
+        )
+        backend = SectionRef.parse("memento/backend")
+        await container.section_service.create(
+            root_context,
+            backend,
+            title="Backend",
+            read_policy=SectionReadPolicy.RESTRICTED,
+        )
+        agent = await container.token_service.create(
+            root_context,
+            name="backend-agent",
+            subject_type=SubjectType.AGENT,
+            grants=[(backend, AccessPermission.PUBLISH)],
+        )
+        agent_context = await container.authorization.authenticate(
+            agent.token, legacy_surface="api"
+        )
+
+        result = await container.memento.publish(
+            PublishDevelopmentContext(
+                context_kind="checkpoint",
+                work_item="BACK-12",
+                title="Inferred project",
+                content="The project comes from the only publish grant.",
+            ),
+            idempotency_key="memento:BACK-12:checkpoint:1",
+            auth=agent_context,
+        )
+
+        stored, _slug = await container.items.get(result.item_id, auth=agent_context)
+        assert stored.section == backend
+        assert stored.metadata["project"] == "backend"
+    finally:
+        await container.close()

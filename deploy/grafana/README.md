@@ -14,7 +14,8 @@ Before importing rules, verify that the metric names exposed by the selected
 Grafana Cloud data source match the OTLP translation used by the stack. The rules
 exclude validation errors and idempotency conflicts from availability alerts.
 
-The `/readyz` alert must be configured with Grafana Synthetic Monitoring (or an
-equivalent external probe), because application readiness is an HTTP condition,
-not a process metric. OTLP exporter health is diagnosed from Railway JSON logs;
-the exporter is fail-safe and cannot make library requests fail.
+The versioned rules include `library_readiness` and an OTLP heartbeat. Railway
+must poll `/readyz` for the readiness gauge to stay current. An additional
+Grafana Synthetic Monitoring probe is recommended because it also detects
+network and routing failures before the application can emit a metric. The
+exporter remains fail-safe and cannot make library requests fail.

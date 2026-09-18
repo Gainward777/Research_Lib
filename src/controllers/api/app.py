@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from controllers.admin import api_controller as admin_controller
 from controllers.api import (
+    attachment_controller,
     health_controller,
     idea_controller,
     item_controller,
@@ -57,6 +58,7 @@ def create_app(
     )
     for router in (
         health_controller.router,
+        attachment_controller.router,
         admin_controller.router,
         upload_controller.router,
         item_controller.router,

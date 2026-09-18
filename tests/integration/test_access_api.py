@@ -35,6 +35,13 @@ async def _seed(settings: Settings) -> dict[str, str]:
                 title=section.value,
                 read_policy=SectionReadPolicy.RESTRICTED,
             )
+        mobile_section = await container.sections_store.require(mobile)
+        mobile_upload = await container.attachments.save_upload(
+            b"mobile secret attachment",
+            "mobile-secret.txt",
+            "text/plain",
+            section_id=mobile_section.id,
+        )
         publisher = await container.token_service.create(
             root_context,
             name="backend-publisher",
@@ -52,6 +59,7 @@ async def _seed(settings: Settings) -> dict[str, str]:
                 section=mobile,
                 type=LibraryItemType.DEVELOPMENT_CONTEXT,
                 title="Mobile private history",
+                attachment_upload_ids=[str(mobile_upload["upload_id"])],
             ),
             auth=root_context,
         )
@@ -60,6 +68,7 @@ async def _seed(settings: Settings) -> dict[str, str]:
             "publisher": publisher.token,
             "reader": reader.token,
             "mobile_item": mobile_item.item_id,
+            "mobile_attachment": str(mobile_upload["upload_id"]),
         }
     finally:
         await container.close()
@@ -84,6 +93,19 @@ def test_dynamic_tokens_protect_rest_admin_and_mcp(tmp_path: Path) -> None:
             ).status_code
             == 404
         )
+        assert (
+            client.get(
+                f"/v1/attachments/{seeded['mobile_attachment']}",
+                headers=publisher_headers,
+            ).status_code
+            == 404
+        )
+        root_download = client.get(
+            f"/v1/attachments/{seeded['mobile_attachment']}",
+            headers={"Authorization": f"Bearer {seeded['root']}"},
+        )
+        assert root_download.status_code == 200
+        assert root_download.content == b"mobile secret attachment"
         assert (
             client.get(
                 f"/v1/items/{seeded['mobile_item']}",

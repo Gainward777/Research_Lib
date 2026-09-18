@@ -85,3 +85,83 @@ groups:
         annotations:
           summary: "Oldest Research Library index job is older than 10 minutes"
           description: "Inspect Railway logs for service={{ $labels.service }} in the last 15 minutes."
+      - alert: ResearchLibraryNotReady
+        expr: library_readiness == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Research Library readiness checks fail for three minutes"
+          description: "Inspect /readyz and Railway logs for service={{ $labels.service }}, environment={{ $labels.environment }}."
+      - alert: ResearchLibraryEmptySearchRatioAboveBaseline
+        expr: |
+          (
+            sum by (service, environment, project) (
+              rate(memento_context_search_requests_total{outcome="empty"}[30m])
+            )
+            /
+            clamp_min(
+              sum by (service, environment, project) (
+                rate(memento_context_search_requests_total[30m])
+              ),
+              0.001
+            )
+          )
+          >
+          2 *
+          (
+            sum by (service, environment, project) (
+              rate(memento_context_search_requests_total{outcome="empty"}[7d])
+            )
+            /
+            clamp_min(
+              sum by (service, environment, project) (
+                rate(memento_context_search_requests_total[7d])
+              ),
+              0.001
+            )
+          )
+          and
+          sum by (service, environment, project) (
+            increase(memento_context_search_requests_total[30m])
+          ) >= 20
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Empty search ratio is over twice its seven-day baseline"
+          description: "Inspect recent retrieval changes for service={{ $labels.service }}, project={{ $labels.project }}."
+      - alert: ResearchLibraryOtlpHeartbeatMissing
+        expr: absent_over_time(library_observability_heartbeat[5m]) == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Research Library OTLP heartbeat is missing"
+          description: "Check the Railway deployment and OTLP exporter logs; no observability heartbeat reached Grafana for five minutes."
+      - alert: ResearchLibraryValidationErrorsSpike
+        expr: |
+          sum by (service, environment, project) (
+            increase(memento_context_search_requests_total{outcome="validation_error"}[15m])
+          )
+          +
+          sum by (service, environment, project) (
+            increase(memento_context_publish_requests_total{outcome="validation_error"}[15m])
+          ) >= 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memento validation errors increased sharply"
+          description: "Inspect client compatibility for service={{ $labels.service }}, project={{ $labels.project }}."
+      - alert: ResearchLibraryIdempotencyConflictsSpike
+        expr: |
+          sum by (service, environment, project) (
+            increase(memento_context_publish_requests_total{outcome="idempotency_conflict"}[15m])
+          ) >= 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memento idempotency conflicts increased sharply"
+          description: "Inspect idempotency-key generation for service={{ $labels.service }}, project={{ $labels.project }}."

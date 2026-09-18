@@ -66,7 +66,9 @@ uv run library-admin --token "$ADMIN_TOKEN" sections create research/private-run
   --title "Private research runs" --policy restricted
 ```
 
-`research/main` и закрытый карантин `memento/_unassigned` создаются миграцией.
+`research/main` и закрытый карантин `memento/_unassigned` создаются миграцией с
+политикой `restricted`. Общий authenticated-доступ включается только явной сменой
+политики оператором.
 
 ## Выдача токенов
 
@@ -136,6 +138,10 @@ REST принимает optional section:
 ```text
 POST /v1/uploads?section=research/main
 ```
+
+Сохранённое вложение скачивается через `GET /v1/attachments/{attachment_id}`.
+Endpoint сначала проверяет read-доступ к section вложения и для закрытого section
+возвращает `404`.
 
 MCP tool `library_search` принимает необязательный массив:
 

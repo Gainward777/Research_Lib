@@ -6,9 +6,12 @@ import pytest
 
 from controllers.utils.infrastructure.gbrain.adapter import GBrainAdapter
 from errors import SearchBackendError
+from models.access import SectionRef
 from models.commands import SearchCommand
 from models.enums import LibraryItemType
 from models.library_item import LibraryItem
+
+TEST_SECTION = SectionRef.parse("research/main")
 
 
 def test_gbrain_result_normalization() -> None:
@@ -83,6 +86,7 @@ async def test_version_mismatch_is_fatal(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_search_keeps_application_filters_out_of_gbrain_payload(tmp_path: Path) -> None:
     adapter = GBrainAdapter(SimpleNamespace(), home=tmp_path)
+    adapter._ensure_source = AsyncMock()
     adapter._run_call = AsyncMock(
         return_value=[
             {
@@ -111,12 +115,27 @@ async def test_search_keeps_application_filters_out_of_gbrain_payload(tmp_path: 
             query="marker",
             types=[LibraryItemType.IDEA],
             tags=["research"],
+            sections=[TEST_SECTION],
             limit=5,
         )
     )
 
     assert [hit.item_id for hit in hits] == ["lib_match"]
-    assert adapter._run_call.await_args.args == ("search", {"query": "marker", "limit": 100})
+    assert adapter._run_call.await_args.args == (
+        "search",
+        {"query": "marker", "limit": 100},
+    )
+    assert adapter._run_call.await_args.kwargs == {
+        "source_id": TEST_SECTION.gbrain_source_id
+    }
+
+
+@pytest.mark.asyncio
+async def test_search_rejects_unscoped_gbrain_call(tmp_path: Path) -> None:
+    adapter = GBrainAdapter(SimpleNamespace(), home=tmp_path)
+
+    with pytest.raises(SearchBackendError, match="exactly one section"):
+        await adapter.search(SearchCommand(query="unscoped"))
 
 
 @pytest.mark.asyncio
@@ -167,6 +186,7 @@ async def test_think_returns_synthesized_answer_with_library_sources(tmp_path: P
     )
     repository = SimpleNamespace(get=AsyncMock(return_value=(item, "ideas/example")))
     adapter = GBrainAdapter(repository, home=tmp_path, think_model="openai:gpt-4.1-mini")
+    adapter._ensure_source = AsyncMock()
     adapter._run_call = AsyncMock(
         return_value={
             "answer": "  Ответ GBrain.\nВторая строка.  ",
@@ -176,7 +196,7 @@ async def test_think_returns_synthesized_answer_with_library_sources(tmp_path: P
     )
     question = "Что известно?"
 
-    result = await adapter.think(SearchCommand(query=question))
+    result = await adapter.think(SearchCommand(query=question, sections=[TEST_SECTION]))
 
     assert result.answer == "  Ответ GBrain.\nВторая строка.  "
     assert [source.item_id for source in result.sources] == [item.id]
@@ -184,3 +204,6 @@ async def test_think_returns_synthesized_answer_with_library_sources(tmp_path: P
         "think",
         {"question": question, "model": "openai:gpt-4.1-mini"},
     )
+    assert adapter._run_call.await_args.kwargs == {
+        "source_id": TEST_SECTION.gbrain_source_id
+    }

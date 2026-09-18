@@ -21,6 +21,9 @@ def test_metrics_endpoint_is_private_and_mcp_auth_is_measured(tmp_path: Path) ->
     with TestClient(create_app(settings, gbrain_factory=FakeGBrainAdapter)) as client:
         health = client.get("/healthz", headers={"X-Request-ID": "req_external"})
         assert health.headers["X-Request-ID"] == "req_external"
+        ready = client.get("/readyz")
+        assert ready.status_code == 200
+        assert ready.json()["status"] == "ok"
 
         unauthorized = client.get("/metrics")
         assert unauthorized.status_code == 401
@@ -40,6 +43,8 @@ def test_metrics_endpoint_is_private_and_mcp_auth_is_measured(tmp_path: Path) ->
     assert "mcp_auth_failures_total" in response.text
     assert 'reason="missing"' in response.text
     assert "library_pending_index_jobs" in response.text
+    assert "library_readiness" in response.text
+    assert "library_observability_heartbeat" in response.text
     assert "metrics-secret" not in response.text
     assert "mcp-secret" not in response.text
     assert "api-secret" not in response.text

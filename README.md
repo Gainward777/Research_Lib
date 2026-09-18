@@ -417,6 +417,7 @@ GET  /healthz
 GET  /readyz
 
 POST /v1/uploads
+GET  /v1/attachments/{attachment_id}
 POST /v1/items
 GET  /v1/items/{item_id}
 POST /v1/items/{item_id}/relations

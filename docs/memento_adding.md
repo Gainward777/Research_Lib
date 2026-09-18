@@ -57,9 +57,10 @@ metadata:
   supersedes_item_id: optional library item ID
 ```
 
-Обязательны `context_kind`, `project`, `title` и непустой `content`. Должен быть
-задан хотя бы один идентификатор рабочего контекста: `work_item` или
-`work_context_id`.
+Обязательны `context_kind`, `title` и непустой `content`. `project` можно не
+передавать, только если токен имеет ровно один Memento-раздел с publish-доступом;
+при нуле или нескольких подходящих разделах он обязателен. Должен быть задан хотя
+бы один идентификатор рабочего контекста: `work_item` или `work_context_id`.
 
 ## 4. Получение контекста
 

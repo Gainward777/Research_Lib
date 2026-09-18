@@ -83,3 +83,35 @@ async def test_consulted_context_is_durable_idempotent_and_measured(
     finally:
         await container.close()
         shutdown_observability()
+
+
+@pytest.mark.asyncio
+async def test_inferred_memento_project_is_used_as_metric_label(tmp_path: Path) -> None:
+    container = await build_container(
+        Settings(
+            _env_file=None,
+            library_data_root=tmp_path / "library",
+            metrics_endpoint_enabled=True,
+            metrics_auth_token="metrics-secret",
+            metrics_allowed_projects=["_unassigned"],
+            otel_deployment_environment="test",
+        ),
+        gbrain_factory=FakeGBrainAdapter,
+    )
+    try:
+        await container.memento.publish(
+            PublishDevelopmentContext(
+                context_kind="checkpoint",
+                work_item="OPS-17",
+                title="Inferred metric scope",
+                content="The observable service resolves the project before recording.",
+            ),
+            idempotency_key="memento:OPS-17:checkpoint:1",
+        )
+
+        rendered = container.observability.render_metrics().decode("utf-8")
+        assert 'project="_unassigned"' in rendered
+        assert 'project="_unknown"' not in rendered
+    finally:
+        await container.close()
+        shutdown_observability()

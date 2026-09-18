@@ -26,7 +26,7 @@ class ContextVerification(StrEnum):
 
 class PublishDevelopmentContext(BaseModel):
     context_kind: DevelopmentContextKind
-    project: str = Field(min_length=1, max_length=120)
+    project: str = Field(default="", max_length=120)
     title: str = Field(min_length=1, max_length=300)
     content: str = Field(min_length=1)
     summary: str = ""

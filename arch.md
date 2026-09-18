@@ -964,7 +964,7 @@ PGLite можно резервировать дополнительно, но в
 - реальный GBrain PGLite write/search;
 - rebuild PGLite из Markdown;
 - search и think routing;
-- attachment upload;
+- attachment upload и авторизованное скачивание;
 - schema pack validation;
 - API token scopes.
 

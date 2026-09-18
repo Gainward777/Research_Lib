@@ -166,27 +166,17 @@ class GBrainAdapter:
         # filters belong to the library contract and are applied after retrieval.
         gbrain_limit = 100 if command.types or command.tags else command.limit
         source_id = self._command_source(command)
-        if command.sections:
-            await self._ensure_source(command.sections[0])
+        await self._ensure_source(command.sections[0])
         payload = {"query": command.query, "limit": gbrain_limit}
-        result = (
-            await self._run_call("search", payload, source_id=source_id)
-            if source_id
-            else await self._run_call("search", payload)
-        )
+        result = await self._run_call("search", payload, source_id=source_id)
         hits = self._normalize_hits(result, gbrain_limit)
         return self._filter_hits(hits, command)[: command.limit]
 
     async def query(self, command: SearchCommand) -> list[SearchHit]:
         source_id = self._command_source(command)
-        if command.sections:
-            await self._ensure_source(command.sections[0])
+        await self._ensure_source(command.sections[0])
         payload = {"query": command.query, "limit": command.limit}
-        result = (
-            await self._run_call("query", payload, source_id=source_id)
-            if source_id
-            else await self._run_call("query", payload)
-        )
+        result = await self._run_call("query", payload, source_id=source_id)
         return self._normalize_hits(result, command.limit)
 
     async def think(self, command: SearchCommand) -> AnswerResult:
@@ -194,13 +184,8 @@ class GBrainAdapter:
         if self.think_model:
             payload["model"] = self.think_model
         source_id = self._command_source(command)
-        if command.sections:
-            await self._ensure_source(command.sections[0])
-        raw_result = (
-            await self._run_call("think", payload, source_id=source_id)
-            if source_id
-            else await self._run_call("think", payload)
-        )
+        await self._ensure_source(command.sections[0])
+        raw_result = await self._run_call("think", payload, source_id=source_id)
         result = self._unwrap(raw_result)
         if not isinstance(result, dict):
             raise SearchBackendError("GBrain think returned an invalid response")
@@ -253,9 +238,7 @@ class GBrainAdapter:
             )
 
     @staticmethod
-    def _command_source(command: SearchCommand) -> str | None:
-        if not command.sections:
-            return None
+    def _command_source(command: SearchCommand) -> str:
         if len(command.sections) != 1:
             raise SearchBackendError("A GBrain call must target exactly one section")
         return command.sections[0].gbrain_source_id

@@ -46,7 +46,17 @@ class MementoService:
         auth: AuthorizationContext | None = None,
     ) -> SaveResult:
         authorization = auth or current_authorization()
-        section = SectionRef(domain=SectionDomain.MEMENTO, key=context.project)
+        requested_section = (
+            SectionRef(domain=SectionDomain.MEMENTO, key=context.project)
+            if context.project
+            else None
+        )
+        section = await self.items.authorization.resolve_publish_section(
+            authorization,
+            requested_section,
+            domain=SectionDomain.MEMENTO,
+        )
+        project = section.key
         superseded_item_id = context.supersedes_item_id
         source_ids = _deduplicate(context.consulted_context_item_ids)
         if superseded_item_id:
@@ -60,7 +70,7 @@ class MementoService:
 
         metadata: dict[str, object] = {
             "context_kind": context.context_kind.value,
-            "project": context.project,
+            "project": project,
             "repository": context.repository,
             "work_item": context.work_item,
             "work_context_id": context.work_context_id,
@@ -76,7 +86,7 @@ class MementoService:
             [
                 *context.tags,
                 "memento",
-                _scope_tag("project", context.project),
+                _scope_tag("project", project),
                 _scope_tag("repository", context.repository) if context.repository else "",
                 _scope_tag("kind", context.context_kind.value),
             ]

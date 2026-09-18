@@ -101,6 +101,8 @@ def get_observability(settings: Settings) -> ObservabilityRuntime:
             recorders.append(
                 OpenTelemetryMetricsRecorder(
                     provider,
+                    service=settings.otel_service_name,
+                    environment=settings.otel_deployment_environment,
                     allowed_projects=settings.metrics_allowed_projects,
                 )
             )

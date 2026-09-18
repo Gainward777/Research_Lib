@@ -73,6 +73,8 @@ class MetricsRecorder(Protocol):
 
     def set_token_counts(self, *, active: int, revoked: int, expired: int) -> None: ...
 
+    def set_readiness(self, *, ready: bool) -> None: ...
+
     def shutdown(self) -> None: ...
 
 
@@ -123,6 +125,9 @@ class NoOpMetricsRecorder:
         return None
 
     def set_token_counts(self, **_values: object) -> None:
+        return None
+
+    def set_readiness(self, **_values: object) -> None:
         return None
 
     def shutdown(self) -> None:
@@ -267,6 +272,19 @@ class PrometheusMetricsRecorder:
             [*base_labels, "status"],
             registry=self.registry,
         )
+        self.readiness = Gauge(
+            "library_readiness",
+            "Whether the application readiness checks currently pass.",
+            base_labels,
+            registry=self.registry,
+        )
+        self.heartbeat = Gauge(
+            "library_observability_heartbeat",
+            "Presence signal exported periodically by the application.",
+            base_labels,
+            registry=self.registry,
+        )
+        self.heartbeat.labels(**self.base).set(1)
 
     def _labels(self, **values: str) -> dict[str, str]:
         return {**self.base, **values}
@@ -351,6 +369,9 @@ class PrometheusMetricsRecorder:
         }.items():
             self.token_counts.labels(**self._labels(status=status)).set(value)
 
+    def set_readiness(self, *, ready: bool) -> None:
+        self.readiness.labels(**self.base).set(1 if ready else 0)
+
     def render(self) -> bytes:
         return generate_latest(self.registry)
 
@@ -363,10 +384,13 @@ class OpenTelemetryMetricsRecorder:
         self,
         provider: MeterProvider,
         *,
+        service: str,
+        environment: str,
         allowed_projects: Iterable[str],
     ) -> None:
         self.provider = provider
         self.normalizer = LabelNormalizer(allowed_projects)
+        self.base = {"service": service, "environment": environment}
         meter = provider.get_meter("research-library")
         self.search_requests = meter.create_counter("memento_context_search_requests")
         self.search_duration = meter.create_histogram(
@@ -394,6 +418,12 @@ class OpenTelemetryMetricsRecorder:
         self.auth_denials = meter.create_counter("library_auth_denials")
         self.section_reads = meter.create_counter("library_section_reads")
         self.token_counts = meter.create_gauge("library_access_tokens")
+        self.readiness = meter.create_gauge("library_readiness")
+        self.heartbeat = meter.create_gauge("library_observability_heartbeat")
+        self.heartbeat.set(1, self.base)
+
+    def _attributes(self, **values: str) -> dict[str, str]:
+        return {**self.base, **values}
 
     def record_memento_search(
         self,
@@ -405,17 +435,17 @@ class OpenTelemetryMetricsRecorder:
         block_counts: dict[str, int],
     ) -> None:
         project = self.normalizer.project(project)
-        attributes = {"outcome": outcome, "project": project}
+        attributes = self._attributes(outcome=outcome, project=project)
         self.search_requests.add(1, attributes)
         self.search_duration.record(duration_seconds, attributes)
-        self.search_hits.record(hit_count, {"project": project})
+        self.search_hits.record(hit_count, self._attributes(project=project))
         for block, count in block_counts.items():
             self.search_blocks.record(
                 count,
-                {
-                    "block": self.normalizer.fixed(block, MEMENTO_BLOCKS),
-                    "project": project,
-                },
+                self._attributes(
+                    block=self.normalizer.fixed(block, MEMENTO_BLOCKS),
+                    project=project,
+                ),
             )
 
     def record_memento_publish(
@@ -430,54 +460,61 @@ class OpenTelemetryMetricsRecorder:
     ) -> None:
         kind = self.normalizer.fixed(kind, MEMENTO_KINDS)
         project = self.normalizer.project(project)
-        attributes = {"kind": kind, "outcome": outcome, "project": project}
+        attributes = self._attributes(kind=kind, outcome=outcome, project=project)
         self.publish_requests.add(1, attributes)
         self.publish_duration.record(duration_seconds, attributes)
         if supersedes:
-            self.supersedes.add(1, {"kind": kind, "project": project})
-        self.consulted_sources.record(consulted_sources, {"kind": kind, "project": project})
+            self.supersedes.add(1, self._attributes(kind=kind, project=project))
+        self.consulted_sources.record(
+            consulted_sources, self._attributes(kind=kind, project=project)
+        )
 
     def record_gbrain(self, *, operation: str, outcome: str, duration_seconds: float) -> None:
-        attributes = {
-            "operation": self.normalizer.fixed(operation, GBRAIN_OPERATIONS),
-            "outcome": outcome,
-        }
+        attributes = self._attributes(
+            operation=self.normalizer.fixed(operation, GBRAIN_OPERATIONS),
+            outcome=outcome,
+        )
         self.gbrain_requests.add(1, attributes)
         self.gbrain_duration.record(duration_seconds, attributes)
 
     def set_pending_index(self, *, jobs: int, oldest_age_seconds: float) -> None:
-        self.pending_jobs.set(jobs)
-        self.oldest_pending_age.set(oldest_age_seconds)
+        self.pending_jobs.set(jobs, self.base)
+        self.oldest_pending_age.set(oldest_age_seconds, self.base)
 
     def record_retry(self, *, outcome: str) -> None:
-        self.retry_jobs.add(1, {"outcome": outcome})
+        self.retry_jobs.add(1, self._attributes(outcome=outcome))
 
     def record_mcp(self, *, tool: str, outcome: str, duration_seconds: float) -> None:
-        attributes = {
-            "tool": self.normalizer.fixed(tool, MCP_TOOLS),
-            "outcome": outcome,
-        }
+        attributes = self._attributes(
+            tool=self.normalizer.fixed(tool, MCP_TOOLS), outcome=outcome
+        )
         self.mcp_requests.add(1, attributes)
         self.mcp_duration.record(duration_seconds, attributes)
 
     def record_mcp_auth_failure(self, *, reason: str) -> None:
-        self.mcp_auth_failures.add(1, {"reason": reason})
+        self.mcp_auth_failures.add(1, self._attributes(reason=reason))
 
     def record_auth(self, *, surface: str, outcome: str, legacy: bool) -> None:
         self.auth_requests.add(
-            1, {"surface": surface, "outcome": outcome, "legacy": str(legacy).lower()}
+            1,
+            self._attributes(
+                surface=surface, outcome=outcome, legacy=str(legacy).lower()
+            ),
         )
 
     def record_auth_denial(self, *, operation: str, domain: str) -> None:
-        self.auth_denials.add(1, {"operation": operation, "domain": domain})
+        self.auth_denials.add(1, self._attributes(operation=operation, domain=domain))
 
     def record_section_read(self, *, policy: str) -> None:
-        self.section_reads.add(1, {"policy": policy})
+        self.section_reads.add(1, self._attributes(policy=policy))
 
     def set_token_counts(self, *, active: int, revoked: int, expired: int) -> None:
-        self.token_counts.set(active, {"status": "active"})
-        self.token_counts.set(revoked, {"status": "revoked"})
-        self.token_counts.set(expired, {"status": "expired"})
+        self.token_counts.set(active, self._attributes(status="active"))
+        self.token_counts.set(revoked, self._attributes(status="revoked"))
+        self.token_counts.set(expired, self._attributes(status="expired"))
+
+    def set_readiness(self, *, ready: bool) -> None:
+        self.readiness.set(1 if ready else 0, self.base)
 
     def shutdown(self) -> None:
         self.provider.shutdown()
@@ -527,6 +564,9 @@ class CompositeMetricsRecorder:
 
     def set_token_counts(self, **values: object) -> None:
         self._call("set_token_counts", **values)
+
+    def set_readiness(self, **values: object) -> None:
+        self._call("set_readiness", **values)
 
     def shutdown(self) -> None:
         for recorder in self.recorders:

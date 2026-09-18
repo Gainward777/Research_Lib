@@ -14,7 +14,7 @@ CREATE TABLE library_sections (
 
 INSERT INTO library_sections(id, domain, key, title, read_policy)
 VALUES
-    ('sec_research_main', 'research', 'main', 'Main research library', 'authenticated'),
+    ('sec_research_main', 'research', 'main', 'Main research library', 'restricted'),
     ('sec_memento_unassigned', 'memento', '_unassigned', 'Unassigned Memento', 'restricted');
 
 CREATE TABLE access_tokens (

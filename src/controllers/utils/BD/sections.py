@@ -4,7 +4,6 @@ from controllers.utils.BD.sqlite import Database
 from errors import NotFoundError
 from models.access import (
     LibrarySection,
-    SectionDomain,
     SectionReadPolicy,
     SectionRef,
     SectionStatus,
@@ -26,11 +25,7 @@ class SectionStore:
         if existing is not None:
             return existing
         section_id = f"sec_{uuid4().hex}"
-        policy = read_policy or (
-            SectionReadPolicy.RESTRICTED
-            if ref.domain == SectionDomain.MEMENTO
-            else SectionReadPolicy.AUTHENTICATED
-        )
+        policy = read_policy or SectionReadPolicy.RESTRICTED
         await self.database.execute(
             "INSERT INTO library_sections(id, domain, key, title, read_policy) "
             "VALUES (?, ?, ?, ?, ?)",

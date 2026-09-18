@@ -73,6 +73,10 @@ At least one of `work_item` and `work_context_id` is required. Prefer an existin
 Linear ID. When none exists, use a stable temporary context ID and keep using it
 for the same work stream.
 
+`project` may be omitted only when the caller token has exactly one Memento
+section with publish access. With zero or multiple matching sections it is
+required explicitly.
+
 Verification values:
 
 - `unverified`;

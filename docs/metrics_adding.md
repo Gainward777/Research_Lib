@@ -298,9 +298,10 @@ METRICS_AUTH_TOKEN=<separate-secret>
 Секреты создаются только в Railway Variables. Они не записываются в `.env.example`
 с реальными значениями, логи или Memento.
 
-Недоступность OTLP endpoint не влияет на `/healthz` и `/readyz`. Exporter имеет
-bounded queue, batch export, timeout и сбрасывает телеметрию при переполнении,
-не блокируя MCP/REST/Telegram.
+Недоступность OTLP endpoint не влияет на `/healthz` и `/readyz`. Metrics SDK
+хранит агрегаты с ограниченной cardinality, а не очередь отдельных событий.
+Periodic exporter имеет ограниченный batch size и timeout и не блокирует
+MCP/REST/Telegram.
 
 ## 12. Grafana dashboards
 
@@ -429,7 +430,8 @@ Railway; Loki в этой версии не используется. Полит
 
 - [x] Unit-проверить, что исключение metrics backend не ломает приложение.
 - [ ] Проверить реальный outage Grafana Cloud на Railway.
-- [ ] Проверить переполнение exporter queue.
+- [x] Подтвердить отсутствие event queue: SDK экспортирует ограниченные агрегаты
+  bounded labels батчами с timeout.
 - [x] Проверить GBrain timeout и pending index.
 - [x] Проверить отсутствие содержимого запросов в telemetry.
 - [ ] Провести нагрузочный тест одновременных MCP-клиентов.

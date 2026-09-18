@@ -67,7 +67,7 @@ Markdown, attachments и GBrain могут оставаться на одном 
 Начальная конфигурация:
 
 - Memento-проекты — `restricted`;
-- `research/main` — `authenticated` либо `restricted`;
+- `research/main` — `restricted` по умолчанию; `authenticated` включается оператором явно;
 - truly public sections выключены глобально до явного разрешения оператора.
 
 ### 3.3. Разрешения

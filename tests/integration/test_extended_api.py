@@ -45,6 +45,13 @@ def test_upload_is_attached_to_item(client, auth_headers) -> None:
     assert len(attachments) == 1
     assert attachments[0]["mime_type"] == "image/webp"
 
+    downloaded = client.get(
+        f"/v1/attachments/{attachments[0]['id']}", headers=auth_headers
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-type"] == "image/webp"
+    assert downloaded.content
+
 
 def test_relation_and_schema_proposal_workflows(client, auth_headers) -> None:
     source = create_item(client, auth_headers, "relation:source", "Source")

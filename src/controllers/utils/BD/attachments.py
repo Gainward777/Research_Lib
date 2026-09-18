@@ -1,18 +1,28 @@
 import hashlib
 import mimetypes
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
 from controllers.utils.BD.sqlite import Database
 from controllers.utils.infrastructure.filesystem.atomic_writer import atomic_write_bytes
 from controllers.utils.infrastructure.filesystem.image_processor import normalize_image
+from errors import NotFoundError
 from models.library_item import Attachment
 
 
 def safe_name(name: str | None) -> str:
     normalized = re.sub(r"[^a-zA-Z0-9._-]+", "-", name or "file").strip(".-")
     return normalized[:120] or "file"
+
+
+@dataclass(frozen=True)
+class AttachmentDownload:
+    path: Path
+    mime_type: str
+    filename: str
+    section_id: str
 
 
 class AttachmentStore:
@@ -114,6 +124,23 @@ class AttachmentStore:
     async def get(self, upload_id: str) -> dict[str, object] | None:
         row = await self.database.fetchone("SELECT * FROM uploads WHERE id = ?", (upload_id,))
         return dict(row) if row is not None else None
+
+    async def resolve_download(self, upload_id: str) -> AttachmentDownload:
+        row = await self.database.fetchone(
+            "SELECT * FROM uploads WHERE id = ?", (upload_id,)
+        )
+        if row is None or row["consumed_at"] is None:
+            raise NotFoundError("Attachment not found")
+        root = self.root.resolve()
+        path = (root / str(row["path"])).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise NotFoundError("Attachment not found")
+        return AttachmentDownload(
+            path=path,
+            mime_type=str(row["mime_type"]),
+            filename=str(row["original_name"] or path.name),
+            section_id=str(row["section_id"]),
+        )
 
     async def discard(self, upload_id: str) -> None:
         row = await self.database.fetchone("SELECT * FROM uploads WHERE id = ?", (upload_id,))

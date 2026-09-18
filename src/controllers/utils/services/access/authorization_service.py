@@ -291,20 +291,35 @@ class AuthorizationService:
             await self.section_store.require(requested)
             await self.require_publish(context, requested)
             return requested
-        available = {
-            grant.section.value: grant.section
-            for grant in context.grants
-            if grant.section is not None
-            and grant.section.domain == domain
-            and grant.permission in {AccessPermission.PUBLISH, AccessPermission.ADMIN}
-        }
         if self._is_system_admin(context) and domain == SectionDomain.RESEARCH:
             default = SectionRef.parse(self.settings.library_default_research_section)
             await self.section_store.ensure(default)
+            await self.require_publish(context, default)
             return default
+        if self._is_system_admin(context):
+            available = {
+                section.ref.value: section.ref
+                for section in await self.section_store.list()
+                if section.ref.domain == domain
+            }
+        else:
+            available: dict[str, SectionRef] = {}
+            for grant in context.grants:
+                if (
+                    grant.section is None
+                    or grant.section.domain != domain
+                    or grant.permission
+                    not in {AccessPermission.PUBLISH, AccessPermission.ADMIN}
+                ):
+                    continue
+                stored = await self.section_store.get_by_ref(grant.section)
+                if stored is not None and stored.status == SectionStatus.ACTIVE:
+                    available[grant.section.value] = grant.section
         if len(available) != 1:
             raise PermissionDeniedError("Section must be specified explicitly")
-        return next(iter(available.values()))
+        selected = next(iter(available.values()))
+        await self.require_publish(context, selected)
+        return selected
 
     def can_delegate(
         self,
