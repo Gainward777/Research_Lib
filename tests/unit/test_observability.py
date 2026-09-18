@@ -157,6 +157,18 @@ def test_metrics_configuration_requires_separate_secrets() -> None:
         )
 
 
+def test_comma_separated_lists_are_parsed_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("METRICS_ALLOWED_PROJECTS", "_unassigned,Platform,research")
+    monkeypatch.setenv("ALLOWED_TELEGRAM_USER_IDS", "10,20")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.metrics_allowed_projects == ["_unassigned", "platform", "research"]
+    assert settings.allowed_telegram_user_ids == [10, 20]
+
+
 @pytest.mark.asyncio
 async def test_gbrain_search_records_outcome_and_latency(tmp_path: Path) -> None:
     recorder = PrometheusMetricsRecorder(

@@ -1,7 +1,8 @@
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_GBRAIN_VERSION = "0.45.12.0"
 
@@ -13,8 +14,8 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = ""
     library_telegram_access_token: SecretStr = SecretStr("")
-    allowed_telegram_user_ids: list[int] = Field(default_factory=list)
-    allowed_telegram_chat_ids: list[int] = Field(default_factory=list)
+    allowed_telegram_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
+    allowed_telegram_chat_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
 
     openai_api_key: SecretStr = SecretStr("")
     library_router_model: str = "gpt-4.1-mini"
@@ -60,7 +61,7 @@ class Settings(BaseSettings):
     metrics_enabled: bool = False
     metrics_endpoint_enabled: bool = False
     metrics_auth_token: SecretStr = SecretStr("")
-    metrics_allowed_projects: list[str] = Field(default_factory=list)
+    metrics_allowed_projects: Annotated[list[str], NoDecode] = Field(default_factory=list)
     otel_service_name: str = "research-library"
     otel_service_version: str = "0.1.0"
     otel_deployment_environment: str = "development"
