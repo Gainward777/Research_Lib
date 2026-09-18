@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -78,6 +79,8 @@ class Settings(BaseSettings):
         if value in (None, ""):
             return []
         if isinstance(value, str):
+            if value.lstrip().startswith("["):
+                return json.loads(value)
             return [int(part.strip()) for part in value.split(",") if part.strip()]
         return value
 
@@ -87,6 +90,9 @@ class Settings(BaseSettings):
         if value in (None, ""):
             return []
         if isinstance(value, str):
+            if value.lstrip().startswith("["):
+                decoded = json.loads(value)
+                return [str(part).strip().casefold() for part in decoded if str(part).strip()]
             return [part.strip().casefold() for part in value.split(",") if part.strip()]
         return value
 
