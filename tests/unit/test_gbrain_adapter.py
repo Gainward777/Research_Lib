@@ -169,6 +169,36 @@ async def test_health_rejects_failed_gbrain_connection(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_health_accepts_nested_warning_payload_and_connection_alias(
+    tmp_path: Path,
+) -> None:
+    adapter = GBrainAdapter(SimpleNamespace(), home=tmp_path)
+    adapter._run_json = AsyncMock(
+        return_value={
+            "data": {
+                "status": "warnings",
+                "checks": [
+                    {"name": "Database Connection", "status": "ok"},
+                    {"name": "brain_score", "status": "fail"},
+                ],
+            }
+        }
+    )
+
+    assert await adapter._doctor_health() is True
+
+
+@pytest.mark.asyncio
+async def test_health_falls_back_to_stats_for_unknown_doctor_shape(tmp_path: Path) -> None:
+    adapter = GBrainAdapter(SimpleNamespace(), home=tmp_path)
+    adapter._run_json = AsyncMock(return_value={"summary": "operational"})
+    adapter._run_call = AsyncMock(return_value={"page_count": 0})
+
+    assert await adapter._doctor_health() is True
+    assert adapter._run_call.await_args.args == ("get_stats", {})
+
+
+@pytest.mark.asyncio
 async def test_readiness_opens_gbrain_stats(tmp_path: Path) -> None:
     adapter = GBrainAdapter(SimpleNamespace(), home=tmp_path)
     adapter._run_call = AsyncMock(return_value={"page_count": 0})

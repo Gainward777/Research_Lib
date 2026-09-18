@@ -33,7 +33,16 @@ class GBrainAdapter:
         "LOCALAPPDATA",
         "OPENAI_API_KEY",
     )
-    READY_STATUSES = {"ok", "healthy", "ready", "pass", "warn", "warning", "degraded"}
+    READY_STATUSES = {
+        "ok",
+        "healthy",
+        "ready",
+        "pass",
+        "warn",
+        "warning",
+        "warnings",
+        "degraded",
+    }
     FAILED_CHECK_STATUSES = {"error", "fail", "failed", "unhealthy"}
     CRITICAL_CHECK_NAMES = {
         "connection",
@@ -124,9 +133,12 @@ class GBrainAdapter:
     async def _doctor_health(self) -> bool:
         """Full startup diagnostic, limited to checks that block library storage."""
         try:
-            result = await self._run_json(["doctor", "--json"])
+            raw_result = await self._run_json(["doctor", "--json"])
         except Exception:
             return False
+        result = self._unwrap(raw_result)
+        if not isinstance(result, dict):
+            return await self.health()
 
         checks = result.get("checks")
         if isinstance(checks, list):
@@ -134,19 +146,32 @@ class GBrainAdapter:
             for check in checks:
                 if not isinstance(check, dict):
                     continue
-                name = str(check.get("name", ""))
+                name = re.sub(
+                    r"[^a-z0-9]+",
+                    "_",
+                    str(check.get("name", "")).strip().casefold(),
+                ).strip("_")
                 status = str(check.get("status", "")).casefold()
-                if name == "connection":
+                is_connection = name == "connection" or name.endswith("_connection")
+                if is_connection:
                     connection_seen = True
-                if name in self.CRITICAL_CHECK_NAMES and status in self.FAILED_CHECK_STATUSES:
+                if (
+                    is_connection or name in self.CRITICAL_CHECK_NAMES
+                ) and status in self.FAILED_CHECK_STATUSES:
                     return False
             # Opinionated maintenance checks (brain score, graph coverage,
             # enrichment) can fail on an empty but operational library and do
             # not make the storage engine unavailable.
-            return connection_seen
+            if connection_seen:
+                return True
 
         status = str(result.get("status", result.get("state", ""))).casefold()
-        return status in self.READY_STATUSES
+        if status in self.READY_STATUSES:
+            return True
+        # Doctor has changed its JSON envelope and check names between pinned
+        # releases. A successful stats call is the compatibility-safe proof
+        # that the embedded database can actually be opened and queried.
+        return await self.health()
 
     async def index(self, item: LibraryItem) -> None:
         row = await self.repository.database.fetchone(
