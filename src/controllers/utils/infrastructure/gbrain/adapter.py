@@ -138,7 +138,7 @@ class GBrainAdapter:
         try:
             raw_result = await self._run_json(["doctor", "--json"])
         except Exception:
-            return False
+            return await self.health()
         result = self._unwrap(raw_result)
         if not isinstance(result, dict):
             return await self.health()

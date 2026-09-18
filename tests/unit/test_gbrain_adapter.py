@@ -199,6 +199,16 @@ async def test_health_falls_back_to_stats_for_unknown_doctor_shape(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_health_falls_back_to_stats_when_doctor_exits_nonzero(tmp_path: Path) -> None:
+    adapter = GBrainAdapter(SimpleNamespace(), home=tmp_path)
+    adapter._run_json = AsyncMock(side_effect=SearchBackendError("doctor warnings"))
+    adapter._run_call = AsyncMock(return_value={"page_count": 0})
+
+    assert await adapter._doctor_health() is True
+    assert adapter._run_call.await_args.args == ("get_stats", {})
+
+
+@pytest.mark.asyncio
 async def test_readiness_opens_gbrain_stats(tmp_path: Path) -> None:
     adapter = GBrainAdapter(SimpleNamespace(), home=tmp_path)
     adapter._run_call = AsyncMock(return_value={"page_count": 0})
