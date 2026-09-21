@@ -85,27 +85,42 @@ async def test_version_mismatch_is_fatal(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_search_keeps_application_filters_out_of_gbrain_payload(tmp_path: Path) -> None:
-    adapter = GBrainAdapter(SimpleNamespace(), home=tmp_path)
+    matching = LibraryItem(
+        id="lib_match",
+        section=TEST_SECTION,
+        type=LibraryItemType.IDEA,
+        title="Match",
+        tags=["research"],
+    )
+    skipped = LibraryItem(
+        id="lib_skip",
+        section=TEST_SECTION,
+        type=LibraryItemType.NOTE,
+        title="Skip",
+    )
+    repository = SimpleNamespace(
+        get=AsyncMock(
+            side_effect=lambda slug: {
+                "ideas/match": (matching, "ideas/match"),
+                "inbox/skip": (skipped, "inbox/skip"),
+            }[slug]
+        )
+    )
+    adapter = GBrainAdapter(repository, home=tmp_path)
     adapter._ensure_source = AsyncMock()
     adapter._run_call = AsyncMock(
         return_value=[
             {
                 "slug": "ideas/match",
-                "frontmatter": {
-                    "id": "lib_match",
-                    "type": "idea",
-                    "title": "Match",
-                    "tags": ["research"],
-                },
+                "title": "Match",
+                "type": "idea",
+                "chunk_text": "Relevant text",
             },
             {
                 "slug": "inbox/skip",
-                "frontmatter": {
-                    "id": "lib_skip",
-                    "type": "note",
-                    "title": "Skip",
-                    "tags": [],
-                },
+                "title": "Skip",
+                "type": "note",
+                "chunk_text": "Irrelevant text",
             },
         ]
     )
@@ -121,6 +136,8 @@ async def test_search_keeps_application_filters_out_of_gbrain_payload(tmp_path: 
     )
 
     assert [hit.item_id for hit in hits] == ["lib_match"]
+    assert hits[0].tags == ["research"]
+    assert repository.get.await_count == 2
     assert adapter._run_call.await_args.args == (
         "search",
         {"query": "marker", "limit": 100},

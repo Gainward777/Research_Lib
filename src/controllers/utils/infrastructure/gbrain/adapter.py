@@ -198,7 +198,29 @@ class GBrainAdapter:
         payload = {"query": command.query, "limit": gbrain_limit}
         result = await self._run_call("search", payload, source_id=source_id)
         hits = self._normalize_hits(result, gbrain_limit)
+        hits = await self._hydrate_hits(hits)
         return self._filter_hits(hits, command)[: command.limit]
+
+    async def _hydrate_hits(self, hits: list[SearchHit]) -> list[SearchHit]:
+        hydrated: list[SearchHit] = []
+        for hit in hits:
+            stored = await self.repository.get(hit.slug or hit.item_id)
+            if stored is None:
+                hydrated.append(hit)
+                continue
+            item, slug = stored
+            hydrated.append(
+                SearchHit(
+                    item_id=item.id,
+                    slug=slug,
+                    type=item.type,
+                    title=item.title,
+                    summary=hit.summary or item.summary,
+                    score=hit.score,
+                    tags=item.tags,
+                )
+            )
+        return hydrated
 
     async def query(self, command: SearchCommand) -> list[SearchHit]:
         source_id = self._command_source(command)
