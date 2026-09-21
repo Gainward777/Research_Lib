@@ -383,10 +383,10 @@ Railway; Loki в этой версии не используется. Полит
 
 ### Этап 1. Provisioning
 
-- [ ] Создать Grafana Cloud stack.
-- [ ] Создать отдельные credentials для OTLP ingestion.
-- [ ] Добавить Railway Variables.
-- [ ] Проверить отправку тестовой метрики и появление JSON-лога в Railway.
+- [x] Создать Grafana Cloud stack.
+- [x] Создать отдельные credentials для OTLP ingestion.
+- [x] Добавить Railway Variables.
+- [x] Проверить отправку тестовой метрики и появление JSON-лога в Railway.
 
 ### Этап 2. Observability core
 
@@ -422,7 +422,7 @@ Railway; Loki в этой версии не используется. Полит
 
 - [x] Создать versioned dashboard.
 - [x] Создать versioned alert rules.
-- [ ] Импортировать dashboard/rules в Grafana Cloud и настроить contact points.
+- [x] Импортировать dashboard/rules в Grafana Cloud и настроить contact points.
 - [x] Добавить в alert временной интервал, service и project для поиска в Railway logs.
 - [ ] Проверить dashboards под параллельной нагрузкой нескольких агентов.
 
@@ -435,6 +435,32 @@ Railway; Loki в этой версии не используется. Полит
 - [x] Проверить GBrain timeout и pending index.
 - [x] Проверить отсутствие содержимого запросов в telemetry.
 - [ ] Провести нагрузочный тест одновременных MCP-клиентов.
+
+## 15.1. Актуальный статус на 2026-09-21
+
+Выполнено 30 из 33 пунктов этапов реализации. Программная часть observability
+готова, Railway настроен на OTLP export в Grafana Cloud, а защищённый `/metrics`
+возвращает серии Memento, GBrain, MCP, очереди индексации и авторизации.
+
+Фактически проверено:
+
+- `METRICS_ENABLED=true`, exporter `otlp`, endpoint и credentials заданы;
+- export interval равен 15 секундам;
+- `/metrics` без токена возвращает `401`, с отдельным metrics token — `200`;
+- Railway `/readyz` возвращает `200`, GBrain health имеет outcome `success`;
+- в логах текущего deployment нет ошибок OTLP exporter;
+- observability-тесты проходят: 13 tests passed.
+
+Для полного закрытия плана остаются три эксплуатационные проверки:
+
+1. Проверить dashboard под параллельной нагрузкой нескольких реальных агентов.
+2. Провести контролируемый outage Grafana Cloud и подтвердить, что MCP/REST и
+   публикация продолжают работать.
+3. Провести нагрузочный тест одновременных MCP-клиентов.
+
+Дополнительно перед production следует искусственно вызвать GBrain timeout и
+подтвердить не только появление временного ряда, но и доставку уведомления через
+настроенный Grafana contact point.
 
 ## 16. Критерии готовности
 
