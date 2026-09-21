@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Быстрое развёртывание Research Library</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Arial, sans-serif; line-height: 1.55; }
+    body { max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; }
+    h1 { margin-bottom: 8px; }
+    h2 { margin-top: 32px; border-bottom: 1px solid #8885; padding-bottom: 6px; }
+    code, pre { font-family: Consolas, monospace; }
+    pre { padding: 14px; overflow-x: auto; border-radius: 8px; background: #8882; }
+    .note { padding: 12px 14px; border-left: 4px solid #d39b00; background: #d39b0018; }
+    li { margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <h1>Быстрое развёртывание Research Library</h1>
+  <p>Инструкция подходит для любого хостинга с Docker, HTTPS и постоянным диском.</p>
+
+  <h2>1. Подготовьте сервис</h2>
+  <ol>
+    <li>Собирайте корневой <code>Dockerfile</code>.</li>
+    <li>Подключите постоянный диск в <code>/data</code>.</li>
+    <li>Опубликуйте порт <code>8000</code> или передайте приложению свой <code>PORT</code>.</li>
+    <li>Настройте healthcheck <code>GET /readyz</code>.</li>
+    <li>Включите HTTPS. MCP будет доступен по адресу <code>https://ваш-домен/mcp</code>.</li>
+  </ol>
+  <pre><code>docker build -t research-library:latest .
+docker volume create research-library-data
+docker run -d --name research-library --restart unless-stopped \
+  -p 8000:8000 \
+  -v research-library-data:/data \
+  --env-file .env \
+  research-library:latest</code></pre>
+
+  <h2>2. Задайте переменные</h2>
+  <pre><code>LIBRARY_DATA_ROOT=/data/library
+LIBRARY_PUBLIC_URL=https://library.example.com
+OPENAI_API_KEY=&lt;OpenAI API key&gt;
+LIBRARY_GBRAIN_THINK_MODEL=openai:gpt-4.1-mini
+LIBRARY_ROUTER_MODEL=gpt-4.1-mini
+
+LIBRARY_AUTH_ENABLED=true
+LIBRARY_AUTH_FAIL_CLOSED=true
+LIBRARY_PUBLIC_SECTIONS_ENABLED=false
+LIBRARY_TOKEN_PEPPER=&lt;случайный секрет не короче 32 байт&gt;
+
+LOG_LEVEL=INFO</code></pre>
+  <p>Создать pepper: <code>openssl rand -base64 32</code>.</p>
+  <div class="note">Храните pepper в secret manager и не меняйте после выдачи токенов. Общие <code>LIBRARY_API_TOKEN</code> и <code>MCP_AUTH_TOKEN</code> новой установке не нужны.</div>
+
+  <h2>3. Создайте системного администратора</h2>
+  <p>Откройте shell работающего контейнера с тем же диском <code>/data</code>:</p>
+  <pre><code>library-admin tokens bootstrap --name platform-admin</code></pre>
+  <p>При запуске из исходного кода:</p>
+  <pre><code>uv run library-admin tokens bootstrap --name platform-admin</code></pre>
+  <p>Bootstrap выполняется один раз. Сохраните поле <code>token</code> в password manager, затем передайте его только текущей shell-сессии:</p>
+  <pre><code>export LIBRARY_ADMIN_TOKEN=&lt;полученный rl_... токен&gt;</code></pre>
+  <p>Не добавляйте административный токен в постоянные переменные приложения.</p>
+
+  <h2>4. Создайте проекты</h2>
+  <pre><code>library-admin sections create memento/backend \
+  --title "Backend" --policy restricted
+
+library-admin sections create research/backend \
+  --title "Backend research" --policy restricted</code></pre>
+  <ul>
+    <li><code>memento/&lt;project&gt;</code> — решения, checkpoint, история реализации и тесты.</li>
+    <li><code>research/&lt;project&gt;</code> — отчёты, идеи и публикации.</li>
+    <li>Один проект не должен использовать раздел другого проекта.</li>
+  </ul>
+
+  <h2>5. Выдайте разработчикам токены</h2>
+  <pre><code>library-admin tokens create \
+  --name ivan-backend \
+  --subject-type developer \
+  --grant memento/backend:read,publish \
+  --grant research/backend:read</code></pre>
+  <p>Для IDE-агента используйте <code>agent</code>, для CI — <code>ci</code>. Для управления разделом выдайте <code>memento/backend:admin</code>.</p>
+  <p>Передавайте токен через password manager или secret manager. В агентной среде настройте:</p>
+  <ul>
+    <li>MCP URL: <code>https://library.example.com/mcp</code>;</li>
+    <li>transport: Streamable HTTP;</li>
+    <li><code>Authorization: Bearer &lt;выданный токен&gt;</code>;</li>
+    <li>пакет <code>agent-skills</code> из репозитория.</li>
+  </ul>
+
+  <h2>6. При необходимости включите Telegram</h2>
+  <pre><code>library-admin tokens create \
+  --name telegram-librarian \
+  --subject-type telegram \
+  --grant research/main:read,publish</code></pre>
+  <p>Затем задайте переменные и перезапустите сервис:</p>
+  <pre><code>TELEGRAM_BOT_TOKEN=&lt;BotFather token&gt;
+LIBRARY_TELEGRAM_ACCESS_TOKEN=&lt;выданный rl_... токен&gt;
+ALLOWED_TELEGRAM_USER_IDS=[123456789]</code></pre>
+
+  <h2>7. Проверьте установку</h2>
+  <ol>
+    <li><code>GET /readyz</code> возвращает <code>200</code>.</li>
+    <li><code>POST /mcp</code> без Bearer token возвращает <code>401</code>.</li>
+    <li>Токен разработчика видит только разрешённые разделы.</li>
+    <li>Проверки ниже завершаются без ошибок.</li>
+  </ol>
+  <pre><code>library-admin sections list
+library-admin tokens list
+library-admin migration verify</code></pre>
+  <p>Создайте тестовую Memento-запись и убедитесь, что токен другого проекта её не находит.</p>
+
+  <h2>8. Эксплуатация</h2>
+  <ul>
+    <li>Регулярно копируйте весь каталог <code>/data</code>.</li>
+    <li>При ротации сначала проверьте новый токен, затем выполните <code>library-admin tokens revoke &lt;token-id&gt;</code>.</li>
+    <li>Обновляйте контейнер без удаления постоянного диска.</li>
+    <li>Не выдавайте <code>system_admin</code> разработчикам, ботам и CI.</li>
+    <li>При потере всех административных токенов восстановите базу из резервной копии.</li>
+  </ul>
+</body>
+</html>
