@@ -15,7 +15,6 @@ def mcp_auth_required_and_missing(
 ) -> bool:
     settings = request.app.state.container.settings
     return (
-        not settings.library_auth_enabled
-        and bool(settings.mcp_auth_token)
+        (settings.library_auth_enabled or bool(settings.mcp_auth_token))
         and not context.authenticated
     )

@@ -86,6 +86,14 @@ def test_dynamic_tokens_protect_rest_admin_and_mcp(tmp_path: Path) -> None:
     publisher_headers = {"Authorization": f"Bearer {seeded['publisher']}"}
 
     with TestClient(create_app(settings, gbrain_factory=FakeGBrainAdapter)) as client:
+        unauthenticated_mcp = client.post(
+            "/mcp",
+            json=INITIALIZE_REQUEST,
+            headers={"Accept": "application/json, text/event-stream"},
+        )
+        assert unauthenticated_mcp.status_code == 401
+        assert unauthenticated_mcp.headers["WWW-Authenticate"] == "Bearer"
+
         assert (
             client.get(
                 f"/v1/items/{seeded['mobile_item']}",

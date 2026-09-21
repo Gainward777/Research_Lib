@@ -1,0 +1,15 @@
+interface:
+  display_name: "Library Development Workflow"
+  short_description: "Автоматически ведёт контекст разработки"
+  default_prompt: "Use $library-development-workflow to coordinate Research Library context throughout this development task."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "research-library"
+      description: "Project-scoped Research Library development memory"
+      transport: "streamable_http"
+      url: "https://researchlib-production.up.railway.app/mcp"
+
+policy:
+  allow_implicit_invocation: true

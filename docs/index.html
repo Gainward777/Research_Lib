@@ -374,7 +374,8 @@ Transport: Streamable HTTP</code></pre>
   "idempotency_key": "memento:AUTH-142:decision:1"
 }</code></pre>
         <div class="note">Записи неизменяемы. Исправление публикуется новой записью с <code>supersedes_item_id</code>. Фактически использованный контекст перечисляется в <code>consulted_context_item_ids</code> и сохраняется отношениями <code>has-source</code>.</div>
-        <p>Канонические сценарии находятся в <code>agent-skills/</code>: поиск контекста, запись знания, checkpoint перед переключением и возобновление работы.</p>
+        <p>Канонические сценарии находятся в <code>agent-skills/</code>. Управляющий <code>library-development-workflow</code> автоматически выбирает поиск контекста, запись подтверждённого знания, checkpoint перед переключением или возобновление работы — разработчику не нужно запускать их вручную.</p>
+        <p>Внешний MCP endpoint: <code>https://researchlib-production.up.railway.app/mcp</code>. Для подключения обязателен project-scoped Bearer token.</p>
       </section>
 
       <section id="observability">

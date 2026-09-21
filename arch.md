@@ -709,8 +709,10 @@ library_save_publication
 secrets, полные логи или внутреннее состояние модели.
 
 Канонические workflows внешних агентов хранятся в `agent-skills/`, но выполняются
-только в Codex, Cursor, Claude Code или другой клиентской среде. Research Library
-не содержит агентный runtime.
+только в Codex, Cursor, Claude Code или другой клиентской среде. Управляющий
+`library-development-workflow` автоматически выбирает узкий workflow на старте,
+при durable-событии, переключении, возобновлении и завершении задачи. Research
+Library не содержит агентный runtime.
 
 ### 14.1. Граница доступа section
 
